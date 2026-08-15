@@ -10,11 +10,9 @@ st.link_button("🚗 Sprawdź korki dojazdowe", "https://www.google.com/maps/dir
 
 LAT = "50.555"
 LON = "21.652"
-# Dodajemy precipitation_probability do zapytania API
 url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation_probability&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=2"
 
 def knots_to_beaufort(kt):
-    """Przelicza węzły na stopnie Beauforta (0-12)"""
     if kt < 1: return 0
     elif kt <= 3: return 1
     elif kt <= 6: return 2
@@ -39,23 +37,30 @@ def beaufort_opis(bft):
 
 def ocena_aktywnosci(bft, bft_szkwal, temp, deszcz):
     oceny = {}
-    
-    # Żeglarstwo bazujące na Beaufortcie (idealnie 2-4 Bft)
     if 2 <= bft <= 4 and bft_szkwal < 6: oceny["⛵ Żeglarstwo"] = "Idealnie"
     elif bft > 4 or bft_szkwal >= 6: oceny["⛵ Żeglarstwo"] = "Trudno (refowanie)"
     else: oceny["⛵ Żeglarstwo"] = "Słaby wiatr"
     
-    # SUP bazujący na Beaufortcie (najlepiej 0-1 Bft)
     if bft <= 1: oceny["🏄 SUP"] = "Idealnie"
     elif bft == 2: oceny["🏄 SUP"] = "Wymagająco"
     else: oceny["🏄 SUP"] = "Niebezpiecznie"
     
-    # Plażowanie (uwzględniamy też deszcz)
     if temp >= 20 and bft <= 2 and deszcz < 30: oceny["🏖️ Plażowanie"] = "Idealnie"
     elif temp < 18 or deszcz >= 50: oceny["🏖️ Plażowanie"] = "Unikaj (deszcz/chłód)"
     else: oceny["🏖️ Plażowanie"] = "Wietrznie"
     
     return oceny
+
+def ocena_zeglarska_punktowa(bft, bft_szkwal, deszcz):
+    """Przelicza warunki żeglarskie na punkty od 0 do 3 do wykresu"""
+    if bft_szkwal >= 6 or deszcz >= 60:
+        return 1, "Trudno / Szkwały"
+    elif 2 <= bft <= 4 and bft_szkwal < 6 and deszcz < 40:
+        return 3, "Idealnie"
+    elif bft == 1 or bft == 5:
+        return 2, "Można pływać"
+    else:
+        return 0, "Słaby wiatr"
 
 try:
     response = requests.get(url)
@@ -79,7 +84,6 @@ try:
         
         formatted_times = [t[-5:] for t in times]
         
-        # Konwersja na skalę Beauforta
         wiatr_bft = [knots_to_beaufort(w) for w in wiatr_kt]
         szkwal_bft = [knots_to_beaufort(s) for s in szkwal_kt]
         
@@ -90,7 +94,6 @@ try:
         for i, (aktywnosc, ocena) in enumerate(oceny.items()):
             cols[i].metric(aktywnosc, ocena)
             
-        # Algorytm rekomendacji okna czasowego
         najlepszy_sup = None
         najlepszy_zeglarz = None
         min_bft_sup = 99
@@ -107,12 +110,34 @@ try:
                     najlepszy_zeglarz = t
 
         st.info(f"💡 **Sugerowane okno czasowe na dziś:**\n\n"
-                f"🏄 **Najlepszy moment na SUP:** ok. **{najlepszy_sup if najlepszy_sup else formatted_times[0]}** (najspokojniejsza woda)\n\n"
+                f"🏄 **Najlepszy moment na SUP:** ok. **{najlepszy_sup if najlepszy_sup else formatted_times[0]}**\n\n"
                 f"⛵ **Najlepszy moment na żagle:** ok. **{najlepszy_zeglarz if najlepszy_zeglarz else 'brak idealnych warunków'}**")
         
         st.divider()
         
-        # --- WYKRES 1: WIATR I SZKWAŁY (BEAUFORT) ---
+        # --- NOWOŚĆ: DEDYKOWANY WYKRES WARUNKÓW ŻEGLARSKICH ---
+        st.subheader("⛵ Ocena warunków żeglarskich godzinowo")
+        
+        sailing_data = []
+        for t, b, bs, d in zip(formatted_times, wiatr_bft, szkwal_bft, deszcz):
+            punkty, status = ocena_zeglarska_punktowa(b, bs, d)
+            sailing_data.append({"Godzina": t, "Ocena": punkty, "Status": status})
+            
+        sail_df = pd.DataFrame(sailing_data)
+        
+        chart_sailing = alt.Chart(sail_df).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+            x=alt.X('Godzina:N', title='Godzina', sort=None),
+            y=alt.Y('Ocena:Q', title='Ocena', scale=alt.Scale(domain=[0, 3])),
+            color=alt.Color('Status:N', title='Warunki', scale=alt.Scale(
+                domain=['Idealnie', 'Można pływać', 'Trudno / Szkwały', 'Słaby wiatr'],
+                range=['#2ca02c', '#1f77b4', '#ff7f0e', '#7f7f7f']
+            )),
+            tooltip=['Godzina', 'Status']
+        ).properties(height=180)
+        
+        st.altair_chart(chart_sailing, use_container_width=True)
+        # -----------------------------------------------------
+        
         st.subheader("Wiatr i Szkwały (Skala Beauforta)")
         wind_df = pd.DataFrame({
             "Godzina": formatted_times * 2,
@@ -124,11 +149,10 @@ try:
             x=alt.X('Godzina:N', title='Godzina', sort=None),
             y=alt.Y('Beaufort (Bft):Q', title='Skala Beauforta', scale=alt.Scale(domain=[0, 12])),
             color=alt.Color('Typ:N', title='', scale=alt.Scale(range=['#1f77b4', '#ff7f0e']))
-        ).properties(height=220)
+        ).properties(height=200)
         
         st.altair_chart(chart_wind, use_container_width=True)
         
-        # --- WYKRES 2: TEMPERATURA I DESZCZ ---
         st.subheader("Temperatura i Szansa Deszczu")
         env_df = pd.DataFrame({
             "Godzina": formatted_times * 2,
@@ -140,11 +164,10 @@ try:
             x=alt.X('Godzina:N', title='Godzina', sort=None),
             y=alt.Y('Wartość:Q', title='°C / %'),
             color=alt.Color('Parametr:N', title='', scale=alt.Scale(range=['#2ca02c', '#d62728']))
-        ).properties(height=200)
+        ).properties(height=180)
         
         st.altair_chart(chart_env, use_container_width=True)
         
-        # --- SZCZEGÓŁOWA TABELA ---
         st.subheader("Szczegóły godzinowe")
         df = pd.DataFrame({
             "Godzina": formatted_times, 
