@@ -3,13 +3,11 @@ import requests
 import pandas as pd
 import altair as alt
 from datetime import datetime, timedelta
-import pytz
 
 st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide")
 
-# --- ZEGAR I DATA ---
-tz_warsaw = pytz.timezone('Europe/Warsaw')
-current_time_warsaw = datetime.now(tz_warsaw)
+# --- ZEGAR I DATA (bez zewnętrznego pytz) ---
+current_time_warsaw = pd.Timestamp.now(tz='Europe/Warsaw')
 formatted_date = current_time_warsaw.strftime('%d.%m.%Y')
 formatted_clock = current_time_warsaw.strftime('%H:%M')
 
