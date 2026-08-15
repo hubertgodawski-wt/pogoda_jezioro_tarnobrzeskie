@@ -5,14 +5,19 @@ import altair as alt
 
 st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide")
 
-st.title("🌊 Warunki na wodzie")
-st.link_button("🚗 Sprawdź korki dojazdowe", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie")
+st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
+
+# Panel przycisków szybkiego dostępu (Korki i Kamery online)
+btn_col1, btn_col2 = st.columns(2)
+with btn_col1:
+    st.link_button("🚗 Sprawdź korki dojazdowe", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
+with btn_col2:
+    st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
 LAT = "50.555"
 LON = "21.652"
 url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
-# --- FUNKCJE POMOCNICZE ---
 def knots_to_beaufort(kt):
     if kt < 1: return 0
     elif kt <= 3: return 1
@@ -53,7 +58,6 @@ def ocena_zeglarska_punktowa(bft, bft_szkwal, deszcz):
     elif bft == 1 or bft == 5: return 2, "Można pływać"
     else: return 0, "Słaby wiatr"
 
-# --- GŁÓWNA LOGIKA ---
 try:
     response = requests.get(url)
     if response.status_code == 200:
@@ -61,7 +65,6 @@ try:
         
         tab1, tab2 = st.tabs(["Dziś (godzinowo)", "Prognoza na 7 dni"])
         
-        # --- TAB 1: DZIŚ ---
         with tab1:
             hourly = data['hourly']
             current_time_str = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
@@ -100,7 +103,6 @@ try:
             df = pd.DataFrame({"Godzina": formatted_times, "Wiatr": [f"{b} Bft" for b in wiatr_bft], "Szkwały": [f"{bs} Bft" for bs in szkwal_bft], "Temp": [f"{round(t, 1)}°C" for t in temp], "Deszcz (%)": deszcz})
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-        # --- TAB 2: PROGNOZA NA 7 DNI ---
         with tab2:
             st.subheader("Prognoza warunków na najbliższe dni")
             daily = data['daily']
@@ -127,5 +129,5 @@ try:
             st.dataframe(df_daily, use_container_width=True, hide_index=True)
             st.info("💡 Wskazówka: Dni oznaczone jako '⛵ Idealnie' łączą stabilny wiatr (2-4 Bft) z brakiem większych opadów.")
 
-    else: st.error("Błąd połączenia.")
+    else: st.error("Błąd pobierania danych.")
 except Exception as e: st.error(f"Błąd: {e}")
