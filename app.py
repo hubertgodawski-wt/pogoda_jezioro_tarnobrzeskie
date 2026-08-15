@@ -9,7 +9,7 @@ st.title("🌊 Warunki na wodzie")
 st.link_button("🚗 Sprawdź korki dojazdowe", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie")
 
 # UWAGA: Podmień ten tekst poniżej na numer ID Twojego spotu na Windguru!
-SPOT_ID = "WPISZ_TUTAJ_NUMER_SPOTU" 
+SPOT_ID = "30390" 
 url = f"https://www.windguru.cz/int/iapi.php?q=forecast&id_spot={SPOT_ID}"
 
 headers = {"User-Agent": "Mozilla/5.0", "Referer": f"https://www.windguru.cz/{SPOT_ID}"}
