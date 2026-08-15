@@ -3,10 +3,18 @@ import requests
 import pandas as pd
 import altair as alt
 from datetime import datetime, timedelta
+import pytz
 
 st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide")
 
+# --- ZEGAR I DATA ---
+tz_warsaw = pytz.timezone('Europe/Warsaw')
+current_time_warsaw = datetime.now(tz_warsaw)
+formatted_date = current_time_warsaw.strftime('%d.%m.%Y')
+formatted_clock = current_time_warsaw.strftime('%H:%M')
+
 st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
+st.caption(f"📅 Dzisiaj jest **{formatted_date}** | ⏰ Aktualny czas: **{formatted_clock}**")
 
 # Panel przycisków
 btn_col1, btn_col2 = st.columns(2)
@@ -16,7 +24,6 @@ with btn_col2:
     st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
 LAT, LON = "50.555", "21.652"
-# Dodano sunrise (wschód słońca) do zapytania API
 url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunrise,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
 def knots_to_beaufort(kt):
@@ -43,7 +50,7 @@ try:
         hourly = data['hourly']
         daily = data['daily']
         
-        curr = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
+        curr = current_time_warsaw.strftime('%Y-%m-%dT%H:00')
         start = hourly['time'].index(curr) if curr in hourly['time'] else 0
         
         # --- BIEŻĄCA POGODA I TREND ---
@@ -82,7 +89,6 @@ try:
         tab1, tab2 = st.tabs(["Dziś (godzinowo)", "Prognoza na 7 dni"])
         
         with tab1:
-            # Wschód i zachód słońca dla dzisiejszego dnia
             sunrise_str = daily['sunrise'][0]
             sunset_str = daily['sunset'][0]
             sunrise_dt = datetime.fromisoformat(sunrise_str)
