@@ -20,7 +20,6 @@ with btn_col2:
     st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
 LAT, LON = "50.555", "21.652"
-# Pobieramy również apparent_temperature (temperatura odczuwalna)
 url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,apparent_temperature,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunrise,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
 def knots_to_beaufort(kt):
@@ -50,7 +49,6 @@ try:
         curr = current_time_warsaw.strftime('%Y-%m-%dT%H:00')
         start = hourly['time'].index(curr) if curr in hourly['time'] else 0
         
-        # --- BIEŻĄCA POGODA I TREND ---
         current_temp = hourly['temperature_2m'][start]
         current_app_temp = hourly['apparent_temperature'][start]
         current_wind_kt = hourly['windspeed_10m'][start]
@@ -73,10 +71,6 @@ try:
         elif max_wind_trend < current_wind_kt - 3:
             trend_desc = "🍃 Wiatr powoli będzie słabł."
 
-        # Porównanie z wczorajszą temperaturą max (delta)
-        temp_max_today = daily['temperature_2m_max'][0]
-        temp_max_yesterday = daily['temperature_2m_max'][0] # uproszczenie lub delta do wczoraj jeśli jest w danych
-        
         st.markdown("---")
         st.subheader("📌 Aktualnie nad wodą")
         m_col1, m_col2, m_col3, m_col4 = st.columns(4)
@@ -140,7 +134,6 @@ try:
             cols = st.columns(3)
             for i, (a, o) in enumerate(oceny.items()): cols[i].metric(a, o)
             
-            # --- AUTOMATYCZNE WYSZUKIWANIE NAJLEPSZEGO OKNA ---
             best_sup, best_sail = [], []
             for t, b, bs, d, h in zip(times, w_bft, s_bft, rain, hours):
                 if b <= 2 and d < 40 and 8 <= h <= 20: best_sup.append(t)
@@ -149,7 +142,7 @@ try:
             sup_window = f"{best_sup[0]} - {best_sup[-1]}" if len(best_sup) > 0 else "brak"
             sail_window = f"{best_sail[0]} - {best_sail[-1]}" if len(best_sail) > 0 else "brak"
             
-            st.success(🎯 **Rekomendowane okna dzisiaj:** \n 🏄 SUP: **{sup_window}** | ⛵ Żagle: **{sail_window}**")
+            st.success(f"🎯 **Rekomendowane okna dzisiaj:** \n 🏄 SUP: **{sup_window}** | ⛵ Żagle: **{sail_window}**")
             
             def draw_chart(chart_data, domain, colors, title):
                 st.subheader(title)
