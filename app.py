@@ -17,21 +17,22 @@ hide_st_style = """
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
+# Czas
 current_time_warsaw = pd.Timestamp.now(tz='Europe/Warsaw')
 formatted_date = current_time_warsaw.strftime('%d.%m.%Y')
 formatted_clock = current_time_warsaw.strftime('%H:%M')
+current_dt = current_time_warsaw.tz_localize(None) # Do obliczeń zachodu słońca
 
-st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
-st.caption(f"📅 Dzisiaj jest **{formatted_date}** | ⏰ Aktualny czas: **{formatted_clock}**")
+st.title("🌊 Jezioro Tarnobrzeskie")
+st.caption(f"📅 **{formatted_date}** | ⏰ **{formatted_clock}**")
 
 btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 1])
 with btn_col1:
     st.link_button("🚗 Dojazd", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
 with btn_col2:
-    st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
+    st.link_button("📹 Kamery", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 with btn_col3:
-    # Ręczne czyszczenie cache, gdy pogoda jest dynamiczna
-    if st.button("🔄 Odśwież", use_container_width=True):
+    if st.button("🔄", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -60,34 +61,32 @@ def get_clothing_advice(app_temp):
     elif app_temp < 20:
         return "Sprawdzi się krótka pianka (shorty) lub grubsza lycra i szorty."
     elif app_temp < 25:
-        return "Lycra UV, szorty kąpielowe. Woda przy dłuższym wpadnięciu może jeszcze chłodzić."
+        return "Lycra UV, szorty kąpielowe. Woda może jeszcze chłodzić przy upadku."
     else:
-        return "Tylko strój kąpielowy, ale KONIECZNIE Lycra z filtrem UV, czapka z daszkiem i okulary!"
+        return "Tylko strój kąpielowy, ale KONIECZNIE Lycra z filtrem UV i czapka!"
 
-# Cache'owanie zapytań - aplikacja nie będzie odpytywać API przy każdym kliknięciu zakładki
 @st.cache_data(ttl=900)
 def fetch_weather():
-    # forecast_days zmienione na 8, by nie zabrakło danych na końcu siódmego dnia
     url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,apparent_temperature,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover,cape,uv_index,surface_pressure,visibility&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunrise,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=8"
     resp = requests.get(url)
     if resp.status_code == 200:
         return resp.json()
     return None
 
-data = fetch_weather()
+# Spinner ładowania w trakcie pobierania danych
+with st.spinner('📡 Pobieranie pomiarów...'):
+    data = fetch_weather()
 
 if data:
     hourly = data['hourly']
     daily = data['daily']
     
-    # Bezpieczne znajdowanie obecnej godziny
     curr = current_time_warsaw.strftime('%Y-%m-%dT%H:00')
     try:
         start = hourly['time'].index(curr)
     except ValueError:
-        start = 0  # Fallback
+        start = 0 
     
-    # Pobieranie aktualnych wartości
     current_temp = hourly['temperature_2m'][start]
     current_app_temp = hourly['apparent_temperature'][start]
     current_wind_kt = hourly['windspeed_10m'][start]
@@ -105,66 +104,75 @@ if data:
     day_capes = hourly['cape'][start:start+12]
     
     max_wind_trend = max(day_winds)
-    max_rain_trend = max(day_rains)
     max_gust_trend = max(day_gusts)
     max_cape_trend = max(day_capes) if day_capes else 0
     max_temp_today = max(hourly['temperature_2m'][start:start+12])
     
-    st.markdown("---")
-    st.subheader("📌 Aktualnie nad wodą")
+    sunset_dt = datetime.fromisoformat(daily['sunset'][0])
     
-    # --- ROZBUDOWANY SYSTEM OSTRZEŻEŃ ---
+    # Toasty z przypomnieniami
+    if current_temp > 25:
+        st.toast("Pamiętaj o butelce wody! Dziś jest gorąco. 💧", icon="🔥")
+    if current_app_temp < 15:
+        st.toast("Woda i wiatr mocno chłodzą. Załóż piankę! 🏄‍♂️", icon="👕")
+    if current_uv >= 6:
+        st.toast("Silne promieniowanie słońca. Użyj kremu z filtrem! ☀️", icon="🧴")
+
+    st.markdown("---")
+    
+    # WERDYKT NA TERAZ (Hero Section)
+    st.markdown("### 🚦 Werdykt na teraz:")
     warnings = []
     
-    # 1. Szkwały
     if max_gust_trend >= 22 or knots_to_beaufort(max_gust_trend) >= 6:
-        warnings.append("🚨 **OSTRZEŻENIE ŻEGLARSKIE:** Prognozowane silne szkwały (powyżej 6 Bft)! Unikaj wychodzenia na wodę.")
-        
-    # 2. Burze (CAPE)
+        warnings.append("🚨 **ŻEGLARSTWO:** Szkwały powyżej 6 Bft! Zostań na brzegu.")
     if max_cape_trend >= 300:
-        warnings.append("⚡ **OSTRZEŻENIE BURZOWE:** Wysoka niestabilność atmosferyczna (CAPE). Wzrost ryzyka wystąpienia burz.")
-        
-    # 3. Spadek ciśnienia
-    if start >= 3:
-        pressure_now = hourly['surface_pressure'][start]
-        pressure_3h = hourly['surface_pressure'][start-3]
-        if (pressure_now - pressure_3h) <= -3:
-            warnings.append("📉 **ZMIANA CIŚNIENIA:** Szybki spadek ciśnienia! Zwiastun załamania pogody lub silnego wiatru.")
-            
-    # 4. Wiatr Odbrzegowy (Niebezpieczny dla SUP z głównej plaży)
+        warnings.append("⚡ **BURZE:** Wysokie CAPE. Zwiększone ryzyko wyładowań.")
+    if start >= 3 and (hourly['surface_pressure'][start] - hourly['surface_pressure'][start-3]) <= -3:
+        warnings.append("📉 **CIŚNIENIE:** Szybki spadek. Zbliża się załamanie pogody.")
     if curr_dir_text in ["W", "WNW", "WSW"] and current_wind_bft >= 2:
-        warnings.append("🚩 **SUP - WIATR ODBRZEGOWY:** Wiatr wieje od strony głównej plaży. Duże ryzyko zniesienia na środek jeziora. Zostań w pobliżu brzegu!")
-        
-    # 5. Widzialność / Mgła
+        warnings.append("🚩 **SUP:** Wiatr ODBRZEGOWY z głównej plaży! Uważaj na zniesienie.")
     if current_vis < 2000:
-        warnings.append("🌫️ **OSTRZEŻENIE:** Słaba widzialność. Zachowaj szczególną ostrożność na wodzie.")
-        
-    # 6. Upał / UV
-    if max_temp_today >= 30 or current_uv >= 7:
-        warnings.append("🔥 **OSTRZEŻENIE SŁONECZNE:** Bardzo silne słońce/upał. Używaj mocnych kremów z filtrem i pij wodę.")
+        warnings.append("🌫️ **WIDZIALNOŚĆ:** Mgła lub zamglenie na wodzie.")
+    if current_uv >= 7:
+        warnings.append("🔥 **UV:** Bardzo silne promieniowanie (Indeks 7+).")
 
-    for warn in warnings:
-        st.error(warn)
+    if warnings:
+        st.error("🔴 **UWAGA! WYSTĘPUJĄ TRUDNE WARUNKI:**")
+        for warn in warnings:
+            st.markdown(f"- {warn}")
+    elif current_wind_bft <= 2 and current_rain < 30:
+        st.success("🟢 **IDEALNIE!** Świetne warunki na SUP i plażowanie.")
+    elif 2 < current_wind_bft <= 4 and current_rain < 30:
+        st.info("🟡 **ŻAGLOWA POGODA!** Świetnie na jacht, na SUP-ie będzie wymagać siły.")
+    else:
+        st.warning("🟠 **UMIARKOWANIE.** Zmienne warunki pogodowe. Sprawdź wykresy.")
 
-    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+    st.markdown("---")
+    
+    # Siatka 2x2 z metrykami zoptymalizowana pod Mobile
+    m_col1, m_col2 = st.columns(2)
     m_col1.metric("Temperatura", f"{round(current_temp, 1)}°C", f"Odczuwalna: {round(current_app_temp, 1)}°C")
     m_col2.metric("Wiatr", f"{current_wind_bft} Bft ({curr_dir_text} {curr_dir_arrow})", f"Szkwały: {current_gust_bft} Bft")
-    m_col3.metric("Indeks UV", f"{round(current_uv, 1)}")
+    
+    m_col3, m_col4 = st.columns(2)
+    m_col3.metric("Indeks UV", f"{round(current_uv, 1)}", f"Chmury: {current_cloud}%")
     m_col4.metric("Deszcz", f"{current_rain}%")
     
+    # Odliczanie do zachodu słońca
+    if current_dt < sunset_dt:
+        diff = sunset_dt - current_dt
+        hrs = diff.seconds // 3600
+        mins = (diff.seconds % 3600) // 60
+        st.info(f"⏳ Do zachodu słońca pozostało: **{hrs} godz. {mins} min.**")
+    else:
+        st.info("🌙 Słońce już zaszło.")
+
     st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs(["Dziś (godzinowo)", "Prognoza na 7 dni", "👕 Sprzęt i Złota Godzina"])
+    tab1, tab2, tab3 = st.tabs(["Dziś (godzinowo)", "Prognoza 7 dni", "👕 Sprzęt i Złota Godzina"])
     
     with tab1:
-        sunrise_str = daily['sunrise'][0]
-        sunset_str = daily['sunset'][0]
-        sunrise_dt = datetime.fromisoformat(sunrise_str)
-        sunset_dt = datetime.fromisoformat(sunset_str)
-        max_beach_dt = sunset_dt + timedelta(minutes=30)
-        
-        st.caption(f"🌅 Wschód słońca: **{sunrise_dt.strftime('%H:%M')}** | Zachód słońca: **{sunset_dt.strftime('%H:%M')}**")
-        
         raw_times = hourly['time'][start:start+12]
         times = [t[-5:] for t in raw_times]
         hours = [int(t[11:13]) for t in raw_times]
@@ -181,7 +189,8 @@ if data:
         def draw_chart(chart_data, domain, colors, title):
             st.subheader(title)
             st.altair_chart(alt.Chart(pd.DataFrame(chart_data)).mark_bar().encode(
-                x='Godzina:N', y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4])), 
+                x=alt.X('Godzina:N', sort=None), 
+                y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4])), 
                 color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors)),
                 tooltip=['Godzina', 'Status']
             ).properties(height=150), use_container_width=True)
@@ -200,13 +209,13 @@ if data:
         for t, b, d, h, dir_txt in zip(times, w_bft, rain, hours, [d[0] for d in dirs_raw]):
             if h < 7 or h > 20: sup_data.append({"Godzina": t, "Ocena": 0, "Status": "🌙 Noc / Zmierzch"})
             elif d >= 50: sup_data.append({"Godzina": t, "Ocena": 4, "Status": "⚠️ Unikaj (Deszcz)"})
-            elif b > 3 or (dir_txt in ["W", "WNW", "WSW"] and b >= 2): sup_data.append({"Godzina": t, "Ocena": 3, "Status": "🚩 Trudno (Odbrzegowy / Wiatr)"})
+            elif b > 3 or (dir_txt in ["W", "WNW", "WSW"] and b >= 2): sup_data.append({"Godzina": t, "Ocena": 3, "Status": "🚩 Trudno (Odbrzegowy)"})
             elif b == 3: sup_data.append({"Godzina": t, "Ocena": 2, "Status": "🐢 Wymagająco"})
             else: sup_data.append({"Godzina": t, "Ocena": 1, "Status": "✅ Idealne"})
             
-        draw_chart(sup_data, ['🌙 Noc / Zmierzch', '⚠️ Unikaj (Deszcz)', '🚩 Trudno (Odbrzegowy / Wiatr)', '🐢 Wymagająco', '✅ Idealne'], ['#333333', '#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena dla SUP")
+        draw_chart(sup_data, ['🌙 Noc / Zmierzch', '⚠️ Unikaj (Deszcz)', '🚩 Trudno (Odbrzegowy)', '🐢 Wymagająco', '✅ Idealne'], ['#333333', '#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena dla SUP")
 
-        with st.expander("📊 Zobacz pełne dane tabelaryczne dla dzisiejszego dnia"):
+        with st.expander("📊 Zobacz pełne dane tabelaryczne"):
             df = pd.DataFrame({
                 "Godzina": times, 
                 "Wiatr": [f"{b} Bft" for b in w_bft], 
@@ -215,14 +224,13 @@ if data:
                 "Temp": [f"{round(t, 1)}°C" for t in temp], 
                 "Odczuwalna": [f"{round(at, 1)}°C" for at in app_temp],
                 "Chmury": [f"{c}%" for c in clouds], 
-                "Deszcz (%)": rain
+                "Deszcz": [f"{r}%" for r in rain]
             })
             st.dataframe(df, use_container_width=True, hide_index=True)
 
     with tab2:
-        st.subheader("Prognoza na 7 dni")
+        st.subheader("Prognoza na najbliższe dni")
         daily_data = []
-        # iterujemy tylko do 7 (bezpieczeństwo tablicy)
         for i in range(7):
             w = daily['windspeed_10m_max'][i]
             r = daily['precipitation_sum'][i]
@@ -242,21 +250,21 @@ if data:
         st.dataframe(pd.DataFrame(daily_data), use_container_width=True, hide_index=True)
 
     with tab3:
-        # Asystent ubioru i Golden Hour
         st.subheader("👕 Asystent Ubioru na Wodę")
-        st.info(f"Aktualna temperatura odczuwalna to **{round(current_app_temp, 1)}°C**. \n\n**Rekomendacja:** {get_clothing_advice(current_app_temp)}")
+        st.info(f"Aktualna temperatura odczuwalna: **{round(current_app_temp, 1)}°C**. \n\n**Rekomendacja:** {get_clothing_advice(current_app_temp)}")
         
         st.markdown("---")
-        st.subheader("📸 Złota Godzina (Najlepsze warunki na zdjęcia)")
+        st.subheader("📸 Złota Godzina (Najlepsze światło)")
         
+        sunrise_dt = datetime.fromisoformat(daily['sunrise'][0])
         gh_morning_start = sunrise_dt
         gh_morning_end = sunrise_dt + timedelta(hours=1)
         gh_evening_start = sunset_dt - timedelta(hours=1)
         gh_evening_end = sunset_dt
         
         c1, c2 = st.columns(2)
-        c1.success(f"🌅 Poranna Złota Godzina: \n**{gh_morning_start.strftime('%H:%M')} - {gh_morning_end.strftime('%H:%M')}**")
-        c2.success(f"🌇 Wieczorna Złota Godzina: \n**{gh_evening_start.strftime('%H:%M')} - {gh_evening_end.strftime('%H:%M')}**")
+        c1.success(f"🌅 Poranna: \n**{gh_morning_start.strftime('%H:%M')} - {gh_morning_end.strftime('%H:%M')}**")
+        c2.success(f"🌇 Wieczorna: \n**{gh_evening_start.strftime('%H:%M')} - {gh_evening_end.strftime('%H:%M')}**")
 
 else:
-    st.error("Błąd pobierania danych. Spróbuj odświeżyć stronę.")
+    st.error("Błąd pobierania danych. Sprawdź połączenie z internetem i odśwież stronę.")
