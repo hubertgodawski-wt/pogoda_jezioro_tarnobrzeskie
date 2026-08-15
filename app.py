@@ -16,7 +16,8 @@ with btn_col2:
     st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
 LAT, LON = "50.555", "21.652"
-url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
+# Dodano sunrise (wschód słońca) do zapytania API
+url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunrise,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
 def knots_to_beaufort(kt):
     if kt < 1: return 0
@@ -45,7 +46,7 @@ try:
         curr = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
         start = hourly['time'].index(curr) if curr in hourly['time'] else 0
         
-        # --- BIEŻĄCA POGODA I TREND NA CAŁY DZIEŃ ---
+        # --- BIEŻĄCA POGODA I TREND ---
         current_temp = hourly['temperature_2m'][start]
         current_wind_kt = hourly['windspeed_10m'][start]
         current_wind_bft = knots_to_beaufort(current_wind_kt)
@@ -54,7 +55,6 @@ try:
         current_rain = hourly['precipitation_probability'][start]
         current_cloud = hourly['cloudcover'][start]
         
-        # Analiza trendu na resztę dnia (kolejne 12h)
         day_winds = hourly['windspeed_10m'][start:start+12]
         day_rains = hourly['precipitation_probability'][start:start+12]
         max_wind_trend = max(day_winds)
@@ -82,7 +82,10 @@ try:
         tab1, tab2 = st.tabs(["Dziś (godzinowo)", "Prognoza na 7 dni"])
         
         with tab1:
+            # Wschód i zachód słońca dla dzisiejszego dnia
+            sunrise_str = daily['sunrise'][0]
             sunset_str = daily['sunset'][0]
+            sunrise_dt = datetime.fromisoformat(sunrise_str)
             sunset_dt = datetime.fromisoformat(sunset_str)
             max_beach_dt = sunset_dt + timedelta(minutes=30)
             max_beach_hour = max_beach_dt.hour
@@ -99,7 +102,7 @@ try:
             rain = day_rains
             clouds = hourly['cloudcover'][start:start+12]
             
-            st.caption(f"🌅 Dziś słońce zachodzi o **{sunset_dt.strftime('%H:%M')}**. Okno plażowe otwarte do **{max_beach_dt.strftime('%H:%M')}**.")
+            st.caption(f"🌅 Wschód słońca: **{sunrise_dt.strftime('%H:%M')}** | Zachód słońca: **{sunset_dt.strftime('%H:%M')}** (okno plażowe do {max_beach_dt.strftime('%H:%M')})")
 
             h_now = hours[0]
             is_after_sunset = (h_now > max_beach_hour) or (h_now == max_beach_hour and 0 >= max_beach_minute)
@@ -184,7 +187,14 @@ try:
                 r = daily['precipitation_sum'][i]
                 bft = knots_to_beaufort(w)
                 status = "⚠️ Niebezpiecznie" if bft>=6 or r>5 else ("⛵ Wymagający" if bft==5 else ("✅ Idealne" if 2<=bft<=4 and r<2 else ("🐢 Zbyt słabo" if bft==1 else "😶 Cisza")))
-                daily_data.append({"Data": t, "Temp Max": f"{round(daily['temperature_2m_max'][i], 1)}°C", "Zachód": daily['sunset'][i][-5:], "Wiatr Max": f"{bft} Bft", "Ocena": status})
+                daily_data.append({
+                    "Data": t, 
+                    "Temp Max": f"{round(daily['temperature_2m_max'][i], 1)}°C", 
+                    "Wschód": daily['sunrise'][i][-5:], 
+                    "Zachód": daily['sunset'][i][-5:], 
+                    "Wiatr Max": f"{bft} Bft", 
+                    "Ocena": status
+                })
             st.dataframe(pd.DataFrame(daily_data), use_container_width=True, hide_index=True)
 
     else: st.error("Błąd pobierania danych.")
