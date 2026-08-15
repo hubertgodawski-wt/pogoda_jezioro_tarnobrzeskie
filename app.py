@@ -108,15 +108,18 @@ if data:
     max_cape_trend = max(day_capes) if day_capes else 0
     max_temp_today = max(hourly['temperature_2m'][start:start+12])
     
+    sunrise_dt = datetime.fromisoformat(daily['sunrise'][0])
     sunset_dt = datetime.fromisoformat(daily['sunset'][0])
+    is_night = current_dt < sunrise_dt or current_dt > sunset_dt
     
-    # Toasty z przypomnieniami
-    if current_temp > 25:
-        st.toast("Pamiętaj o butelce wody! Dziś jest gorąco. 💧", icon="🔥")
-    if current_app_temp < 15:
-        st.toast("Woda i wiatr mocno chłodzą. Załóż piankę! 🏄‍♂️", icon="👕")
-    if current_uv >= 6:
-        st.toast("Silne promieniowanie słońca. Użyj kremu z filtrem! ☀️", icon="🧴")
+    # Toasty z przypomnieniami (wyświetlą się tylko w dzień dla lepszego UX)
+    if not is_night:
+        if current_temp > 25:
+            st.toast("Pamiętaj o butelce wody! Dziś jest gorąco. 💧", icon="🔥")
+        if current_app_temp < 15:
+            st.toast("Woda i wiatr mocno chłodzą. Załóż piankę! 🏄‍♂️", icon="👕")
+        if current_uv >= 6:
+            st.toast("Silne promieniowanie słońca. Użyj kremu z filtrem! ☀️", icon="🧴")
 
     st.markdown("---")
     
@@ -137,7 +140,9 @@ if data:
     if current_uv >= 7:
         warnings.append("🔥 **UV:** Bardzo silne promieniowanie (Indeks 7+).")
 
-    if warnings:
+    if is_night:
+        st.info("🌙 **JEST NOC.** Czas na odpoczynek, na wodę i plażę wracamy rano!")
+    elif warnings:
         st.error("🔴 **UWAGA! WYSTĘPUJĄ TRUDNE WARUNKI:**")
         for warn in warnings:
             st.markdown(f"- {warn}")
@@ -160,7 +165,12 @@ if data:
     m_col4.metric("Deszcz", f"{current_rain}%")
     
     # Odliczanie do zachodu słońca
-    if current_dt < sunset_dt:
+    if current_dt < sunrise_dt:
+        diff = sunrise_dt - current_dt
+        hrs = diff.seconds // 3600
+        mins = (diff.seconds % 3600) // 60
+        st.info(f"⏳ Do wschodu słońca pozostało: **{hrs} godz. {mins} min.**")
+    elif current_dt < sunset_dt:
         diff = sunset_dt - current_dt
         hrs = diff.seconds // 3600
         mins = (diff.seconds % 3600) // 60
@@ -256,7 +266,6 @@ if data:
         st.markdown("---")
         st.subheader("📸 Złota Godzina (Najlepsze światło)")
         
-        sunrise_dt = datetime.fromisoformat(daily['sunrise'][0])
         gh_morning_start = sunrise_dt
         gh_morning_end = sunrise_dt + timedelta(hours=1)
         gh_evening_start = sunset_dt - timedelta(hours=1)
