@@ -72,41 +72,42 @@ try:
                 if 2 <= b <= 4 and bs < 6 and d < 30 and not sail: sail = t
             st.info(f"🏄 SUP: **{sup or 'brak'}** | ⛵ Żagle: **{sail or 'brak'}**")
             
+            # Uniwersalna funkcja rysująca z pełną skalą [0, 4]
             def draw_chart(chart_data, domain, colors, title):
                 st.subheader(title)
                 st.altair_chart(alt.Chart(pd.DataFrame(chart_data)).mark_bar().encode(
-                    x='Godzina:N', y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 3])), 
+                    x='Godzina:N', y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4])), 
                     color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors)),
                     tooltip=['Godzina', 'Status']
                 ).properties(height=150), use_container_width=True)
 
-            # 1. Żeglarstwo
+            # 1. Żeglarstwo (skala 0-4)
             sail_data = []
             for t, b, bs, d in zip(times, w_bft, s_bft, rain):
-                if bs >= 6 or d >= 50: sail_data.append({"Godzina": t, "Ocena": 3, "Status": "⚠️ Niebezpiecznie"})
-                elif b >= 5: sail_data.append({"Godzina": t, "Ocena": 2, "Status": "⛵ Wymagający"})
-                elif 2 <= b <= 4 and bs < 6 and d < 30: sail_data.append({"Godzina": t, "Ocena": 1, "Status": "✅ Idealne"})
+                if bs >= 6 or d >= 50: sail_data.append({"Godzina": t, "Ocena": 4, "Status": "⚠️ Niebezpiecznie"})
+                elif b >= 5: sail_data.append({"Godzina": t, "Ocena": 3, "Status": "⛵ Wymagający"})
+                elif 2 <= b <= 4 and bs < 6 and d < 30: sail_data.append({"Godzina": t, "Ocena": 2, "Status": "✅ Idealne"})
                 elif b == 1: sail_data.append({"Godzina": t, "Ocena": 1, "Status": "🐢 Zbyt słabo"})
                 else: sail_data.append({"Godzina": t, "Ocena": 0, "Status": "😶 Cisza"})
             draw_chart(sail_data, ['⚠️ Niebezpiecznie', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], ['#d62728', '#ff7f0e', '#2ca02c', '#87CEEB', '#808080'], "⛵ Ocena żeglarska")
 
-            # 2. SUP (poprawiona logika)
+            # 2. SUP (pełna skala 0-4)
             sup_data = []
             for t, b, d in zip(times, w_bft, rain):
-                if d >= 50: sup_data.append({"Godzina": t, "Ocena": 0, "Status": "⚠️ Unikaj"})
-                elif b > 3: sup_data.append({"Godzina": t, "Ocena": 1, "Status": "⛵ Trudno"})
+                if d >= 50: sup_data.append({"Godzina": t, "Ocena": 4, "Status": "⚠️ Unikaj"})
+                elif b > 3: sup_data.append({"Godzina": t, "Ocena": 3, "Status": "⛵ Trudno"})
                 elif b == 3: sup_data.append({"Godzina": t, "Ocena": 2, "Status": "🐢 Wymagająco"})
-                else: sup_data.append({"Godzina": t, "Ocena": 3, "Status": "✅ Idealne"})
+                else: sup_data.append({"Godzina": t, "Ocena": 1, "Status": "✅ Idealne"})
             draw_chart(sup_data, ['⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], ['#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena SUP")
 
-            # 3. Plażowanie (poprawiona logika)
+            # 3. Plażowanie (pełna skala 0-4)
             beach_data = []
             for t, tm, b, d in zip(times, temp, w_bft, rain):
-                if d >= 50: beach_data.append({"Godzina": t, "Ocena": 0, "Status": "⚠️ Unikaj"})
-                elif tm < 20: beach_data.append({"Godzina": t, "Ocena": 1, "Status": "❄️ Chłodno"})
+                if d >= 50: beach_data.append({"Godzina": t, "Ocena": 4, "Status": "⚠️ Unikaj"})
+                elif tm < 20: beach_data.append({"Godzina": t, "Ocena": 3, "Status": "❄️ Chłodno"})
                 elif b > 3: beach_data.append({"Godzina": t, "Ocena": 2, "Status": "🌬️ Wietrznie"})
-                else: beach_data.append({"Godzina": t, "Ocena": 3, "Status": "✅ Idealnie"})
-            draw_chart(beach_data, ['⚠️ Unikaj', '❄️ Chłodno', '🌬️ Wietrznie', '✅ Idealnie'], ['#d62728', '#1f77b4', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
+                else: beach_data.append({"Godzina": t, "Ocena": 1, "Status": "✅ Idealne"})
+            draw_chart(beach_data, ['⚠️ Unikaj', '❄️ Chłodno', '🌬️ Wietrznie', '✅ Idealne'], ['#d62728', '#1f77b4', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
 
             # Wykres wiatru
             st.subheader("Pogoda (Wiatr i Szkwały)")
