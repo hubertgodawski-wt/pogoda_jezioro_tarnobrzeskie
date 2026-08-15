@@ -15,8 +15,8 @@ with btn_col2:
     st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
 LAT, LON = "50.555", "21.652"
-# Pobieramy również dane dzienne sunset (zachód słońca)
-url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
+# Dodano winddirection_10m do API
+url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
 def knots_to_beaufort(kt):
     if kt < 1: return 0
@@ -27,6 +27,12 @@ def knots_to_beaufort(kt):
     elif kt <= 21: return 5
     elif kt <= 27: return 6
     else: return 7
+
+def degrees_to_cardinal(deg):
+    if deg is None: return "-"
+    dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    ix = int((deg + 11.25) / 22.5) % 16
+    return dirs[ix]
 
 # --- GŁÓWNA LOGIKA ---
 try:
@@ -39,10 +45,8 @@ try:
             hourly = data['hourly']
             daily = data['daily']
             
-            # Pobieramy godzinę zachodu słońca dla dzisiejszego dnia (indeks 0 w daily)
-            sunset_str = daily['sunset'][0] # np. "2026-08-15T20:15"
+            sunset_str = daily['sunset'][0]
             sunset_dt = datetime.fromisoformat(sunset_str)
-            # Dodajemy 30 minut
             max_beach_dt = sunset_dt + timedelta(minutes=30)
             max_beach_hour = max_beach_dt.hour
             max_beach_minute = max_beach_dt.minute
@@ -56,19 +60,17 @@ try:
             
             w_bft = [knots_to_beaufort(w) for w in hourly['windspeed_10m'][start:start+12]]
             s_bft = [knots_to_beaufort(s) for s in hourly['windgusts_10m'][start:start+12]]
+            w_dir = [degrees_to_cardinal(d) for d in hourly['winddirection_10m'][start:start+12]]
             temp = hourly['temperature_2m'][start:start+12]
             rain = hourly['precipitation_probability'][start:start+12]
             clouds = hourly['cloudcover'][start:start+12]
             
-            # Informacja dla użytkownika o dynamicznym zachodzie słońca
             st.caption(f"🌅 Dziś słońce zachodzi o **{sunset_dt.strftime('%H:%M')}**. Okno plażowe otwarte do **{max_beach_dt.strftime('%H:%M')}**.")
 
-            # Górne metryki (dla bieżącej godziny)
             h_now = hours[0]
             is_after_sunset = (h_now > max_beach_hour) or (h_now == max_beach_hour and 0 >= max_beach_minute)
             
             oceny = {}
-            # Żeglarstwo i SUP
             if 2 <= w_bft[0] <= 4 and s_bft[0] < 6: oceny["⛵ Żeglarstwo"] = "Idealnie"
             elif w_bft[0] > 4 or s_bft[0] >= 6: oceny["⛵ Żeglarstwo"] = "Trudno"
             else: oceny["⛵ Żeglarstwo"] = "Słaby"
@@ -77,7 +79,6 @@ try:
             elif w_bft[0] == 3: oceny["🏄 SUP"] = "Wymagająco"
             else: oceny["🏄 SUP"] = "Niebezpiecznie"
 
-            # Plażowanie z dynamicznym zachodem
             if is_after_sunset or h_now < 9:
                 oceny["🏖️ Plażowanie"] = "Po zmroku / Noc"
             elif temp[0] >= 20 and w_bft[0] <= 2 and rain[0] < 30 and clouds[0] < 40:
@@ -124,10 +125,9 @@ try:
                 else: sup_data.append({"Godzina": t, "Ocena": 1, "Status": "✅ Idealne"})
             draw_chart(sup_data, ['🌙 Noc / Zmierzch', '⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], ['#333333', '#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena SUP")
 
-            # 3. Plażowanie (używa dynamicznego max_beach_hour)
+            # 3. Plażowanie
             beach_data = []
             for t, tm, b, d, c, h in zip(times, temp, w_bft, rain, clouds, hours):
-                # Jeśli godzina jest po zachodzie słońca + 30 min lub przed 9 rano
                 if (h > max_beach_hour or (h == max_beach_hour and max_beach_minute > 0)) or h < 9:
                     beach_data.append({"Godzina": t, "Ocena": 0, "Status": "🌙 Po zachodzie słońca"})
                 elif d >= 50 or tm < 16:
@@ -138,12 +138,11 @@ try:
                     beach_data.append({"Godzina": t, "Ocena": 3, "Status": "⛅ Umiarkowanie"})
                 else:
                     beach_data.append({"Godzina": t, "Ocena": 4, "Status": "☀️ Idealne słońce"})
-            
             draw_chart(beach_data, ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], ['#333333', '#d62728', '#7f7f7f', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
 
-            # Tabela
+            # Tabela (z kierunkiem wiatru)
             st.subheader("Szczegóły godzinowe")
-            df = pd.DataFrame({"Godzina": times, "Wiatr": [f"{b} Bft" for b in w_bft], "Temp": [f"{round(t, 1)}°C" for t in temp], "Chmury": [f"{c}%" for c in clouds], "Deszcz (%)": rain})
+            df = pd.DataFrame({"Godzina": times, "Wiatr": [f"{b} Bft" for b in w_bft], "Kierunek": w_dir, "Szkwały": [f"{s} Bft" for s in s_bft], "Temp": [f"{round(t, 1)}°C" for t in temp], "Chmury": [f"{c}%" for c in clouds], "Deszcz (%)": rain})
             st.dataframe(df, use_container_width=True, hide_index=True)
 
         with tab2:
@@ -155,7 +154,7 @@ try:
                 r = daily['precipitation_sum'][i]
                 bft = knots_to_beaufort(w)
                 status = "⚠️ Niebezpiecznie" if bft>=6 or r>5 else ("⛵ Wymagający" if bft==5 else ("✅ Idealne" if 2<=bft<=4 and r<2 else ("🐢 Zbyt słabo" if bft==1 else "😶 Cisza")))
-                daily_data.append({"Data": t, "Temp Max": f"{round(daily['temperature_2m_max'][i], 1)}°C", "Zachód słońca": daily['sunset'][i][-5:], "Wiatr Max": f"{bft} Bft", "Ocena": status})
+                daily_data.append({"Data": t, "Temp Max": f"{round(daily['temperature_2m_max'][i], 1)}°C", "Zachód": daily['sunset'][i][-5:], "Wiatr Max": f"{bft} Bft", "Ocena": status})
             st.dataframe(pd.DataFrame(daily_data), use_container_width=True, hide_index=True)
 
     else: st.error("Błąd pobierania danych.")
