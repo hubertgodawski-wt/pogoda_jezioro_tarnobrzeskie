@@ -7,10 +7,10 @@ st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide"
 
 st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
 
-# Panel przycisków
+# Panel przycisków (zmieniona nazwa na "🚗 Dojazd")
 btn_col1, btn_col2 = st.columns(2)
 with btn_col1:
-    st.link_button("🚗 Sprawdź korki dojazdowe", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
+    st.link_button("🚗 Dojazd", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
 with btn_col2:
     st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
@@ -47,7 +47,6 @@ def ocena_aktywnosci(bft, bft_szkwal, temp, deszcz):
     return oceny
 
 def ocena_zeglarska_szczegolowa(bft, bft_szkwal, deszcz):
-    """Zwraca unikalny wynik punktowy dla każdego stanu"""
     if bft_szkwal >= 6 or deszcz >= 50: return 4, "⚠️ Niebezpiecznie"
     elif bft >= 5: return 3, "⛵ Wymagający wiatr"
     elif 2 <= bft <= 4 and bft_szkwal < 6 and deszcz < 30: return 2, "✅ Idealne warunki"
@@ -115,7 +114,6 @@ try:
             daily_data = []
             for t, w, r in zip(daily['time'], daily['windspeed_10m_max'], daily['precipitation_sum']):
                 bft = knots_to_beaufort(w)
-                # Spójna logika kolorystyczna
                 if bft >= 6 or r > 5.0: status = "⚠️ Niebezpiecznie"
                 elif bft == 5: status = "⛵ Wymagający wiatr"
                 elif 2 <= bft <= 4 and r < 2.0: status = "✅ Idealne warunki"
