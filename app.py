@@ -18,6 +18,7 @@ LAT = "50.555"
 LON = "21.652"
 url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
+# --- FUNKCJE ---
 def knots_to_beaufort(kt):
     if kt < 1: return 0
     elif kt <= 3: return 1
@@ -56,61 +57,62 @@ def ocena_zeglarska_punktowa(bft, bft_szkwal, deszcz):
     elif bft == 1: return 1, "Zbyt słabo"
     else: return 0, "Cisza"
 
+# --- LOGIKA ---
 try:
     response = requests.get(url)
     if response.status_code == 200:
         data = response.json()
-        
         tab1, tab2 = st.tabs(["Dziś (godzinowo)", "Prognoza na 7 dni"])
         
         with tab1:
             hourly = data['hourly']
-            current_time_str = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
-            start_idx = hourly['time'].index(current_time_str) if current_time_str in hourly['time'] else 0
+            curr = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
+            start = hourly['time'].index(curr) if curr in hourly['time'] else 0
             
-            times = hourly['time'][start_idx:start_idx+12]
-            wiatr_kt = hourly['windspeed_10m'][start_idx:start_idx+12]
-            szkwal_kt = hourly['windgusts_10m'][start_idx:start_idx+12]
-            temp = hourly['temperature_2m'][start_idx:start_idx+12]
-            deszcz = hourly['precipitation_probability'][start_idx:start_idx+12]
-            formatted_times = [t[-5:] for t in times]
+            times = hourly['time'][start:start+12]
+            w_kt = hourly['windspeed_10m'][start:start+12]
+            s_kt = hourly['windgusts_10m'][start:start+12]
+            temp = hourly['temperature_2m'][start:start+12]
+            rain = hourly['precipitation_probability'][start:start+12]
+            fmt_t = [t[-5:] for t in times]
             
-            wiatr_bft = [knots_to_beaufort(w) for w in wiatr_kt]
-            szkwal_bft = [knots_to_beaufort(s) for s in szkwal_kt]
+            w_bft = [knots_to_beaufort(w) for w in w_kt]
+            s_bft = [knots_to_beaufort(s) for s in s_kt]
             
-            oceny = ocena_aktywnosci(wiatr_bft[0], szkwal_bft[0], temp[0], deszcz[0])
+            # Metryki
             cols = st.columns(3)
-            for i, (akt, oc) in enumerate(oceny.items()): cols[i].metric(akt, oc)
+            oceny = ocena_aktywnosci(w_bft[0], s_bft[0], temp[0], rain[0])
+            for i, (a, o) in enumerate(oceny.items()): cols[i].metric(a, o)
             
-            st.subheader("Ocena żeglarska godzinowa")
-            sailing_data = [{"Godzina": t, "Ocena": ocena_zeglarska_punktowa(b, bs, d)[0], "Status": ocena_zeglarska_punktowa(b, bs, d)[1]} for t, b, bs, d in zip(formatted_times, wiatr_bft, szkwal_bft, deszcz)]
+            # Rekomendacja
+            sup, sail = None, None
+            for t, b, bs, d in zip(fmt_t, w_bft, s_bft, rain):
+                if b < 2 and d < 40 and not sup: sup = t
+                if 2 <= b <= 4 and bs < 6 and d < 30 and not sail: sail = t
+            st.info(f"🏄 SUP: **{sup or 'brak'}** | ⛵ Żagle: **{sail or 'brak'}**")
             
-            st.altair_chart(alt.Chart(pd.DataFrame(sailing_data)).mark_bar().encode(
-                x='Godzina:N', 
-                y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 3])), 
-                color=alt.Color('Status:N', scale=alt.Scale(
-                    domain=['Idealne warunki', 'Wymagający wiatr', 'Zbyt słabo', 'Niebezpiecznie'],
-                    range=['#2ca02c', '#1f77b4', '#7f7f7f', '#d62728']
-                ))
-            ).properties(height=180), use_container_width=True)
+            # Wykresy
+            st.subheader("Ocena żeglarska")
+            sail_data = [{"Godzina": t, "Ocena": ocena_zeglarska_punktowa(b, bs, d)[0], "Status": ocena_zeglarska_punktowa(b, bs, d)[1]} for t, b, bs, d in zip(fmt_t, w_bft, s_bft, rain)]
+            st.altair_chart(alt.Chart(pd.DataFrame(sail_data)).mark_bar().encode(x='Godzina:N', y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0,3])), color='Status:N').properties(height=150), use_container_width=True)
             
             st.subheader("Pogoda (Wiatr i Szkwały)")
-            wind_df = pd.DataFrame({"Godzina": formatted_times*2, "Bft": wiatr_bft+szkwal_bft, "Typ": ["Wiatr"]*12+["Szkwały"]*12})
+            wind_df = pd.DataFrame({"Godzina": fmt_t*2, "Bft": w_bft+s_bft, "Typ": ["Wiatr"]*12+["Szkwały"]*12})
             st.altair_chart(alt.Chart(wind_df).mark_area(opacity=0.4).encode(x='Godzina:N', y='Bft:Q', color='Typ:N').properties(height=200), use_container_width=True)
+            
+            st.subheader("Szczegóły godzinowe")
+            df = pd.DataFrame({"Godzina": fmt_t, "Wiatr": [f"{b} Bft" for b in w_bft], "Szkwały": [f"{bs} Bft" for bs in s_bft], "Temp": [f"{round(t, 1)}°C" for t in temp], "Deszcz (%)": rain})
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
         with tab2:
-            st.subheader("Prognoza na najbliższe dni")
+            st.subheader("Prognoza na 7 dni")
             daily = data['daily']
             daily_data = []
             for t, w, r in zip(daily['time'], daily['windspeed_10m_max'], daily['precipitation_sum']):
                 bft = knots_to_beaufort(w)
-                # Uproszczona ocena dla dniówki
-                if bft >= 5 or r > 2: status = "Trudne"
-                elif 2 <= bft <= 4: status = "⛵ Idealnie"
-                else: status = "Słabo"
-                daily_data.append({"Data": t, "Wiatr Max": f"{bft} Bft", "Deszcz": f"{round(r, 1)} mm", "Ocena": status})
-            
+                status = "⛵ Idealnie" if (2 <= bft <= 4 and r < 2.0) else ("Trudne" if bft >= 5 or r > 2 else "Słabo")
+                daily_data.append({"Data": t, "Temp": f"{round(daily['temperature_2m_max'][daily['time'].index(t)], 1)}°C", "Wiatr": f"{bft} Bft", "Deszcz": f"{round(r, 1)} mm", "Ocena": status})
             st.dataframe(pd.DataFrame(daily_data), use_container_width=True, hide_index=True)
 
-    else: st.error("Błąd pobierania danych.")
+    else: st.error("Błąd połączenia.")
 except Exception as e: st.error(f"Błąd: {e}")
