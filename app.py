@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide")
 
-# --- ZEGAR I DATA (bez zewnętrznego pytz) ---
 current_time_warsaw = pd.Timestamp.now(tz='Europe/Warsaw')
 formatted_date = current_time_warsaw.strftime('%d.%m.%Y')
 formatted_clock = current_time_warsaw.strftime('%H:%M')
@@ -14,7 +13,6 @@ formatted_clock = current_time_warsaw.strftime('%H:%M')
 st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
 st.caption(f"📅 Dzisiaj jest **{formatted_date}** | ⏰ Aktualny czas: **{formatted_clock}**")
 
-# Panel przycisków
 btn_col1, btn_col2 = st.columns(2)
 with btn_col1:
     st.link_button("🚗 Dojazd", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
@@ -22,7 +20,8 @@ with btn_col2:
     st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
 LAT, LON = "50.555", "21.652"
-url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunrise,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
+# Pobieramy również apparent_temperature (temperatura odczuwalna)
+url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,apparent_temperature,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunrise,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
 def knots_to_beaufort(kt):
     if kt < 1: return 0
@@ -35,12 +34,12 @@ def knots_to_beaufort(kt):
     else: return 7
 
 def degrees_to_cardinal(deg):
-    if deg is None: return "-"
+    if deg is None: return ("-", "⬆️")
     dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    arrows = ["⬇️", "↙️", "↙️", "⬅️", "⬅️", "↖️", "↖️", "⬆️", "⬆️", "↗️", "↗️", "➡️", "➡️", "↘️", "↘️", "⬇️"]
     ix = int((deg + 11.25) / 22.5) % 16
-    return dirs[ix]
+    return dirs[ix], arrows[ix]
 
-# --- GŁÓWNA LOGIKA ---
 try:
     response = requests.get(url)
     if response.status_code == 200:
@@ -53,10 +52,11 @@ try:
         
         # --- BIEŻĄCA POGODA I TREND ---
         current_temp = hourly['temperature_2m'][start]
+        current_app_temp = hourly['apparent_temperature'][start]
         current_wind_kt = hourly['windspeed_10m'][start]
         current_wind_bft = knots_to_beaufort(current_wind_kt)
         current_gust_bft = knots_to_beaufort(hourly['windgusts_10m'][start])
-        current_dir = degrees_to_cardinal(hourly['winddirection_10m'][start])
+        curr_dir_text, curr_dir_arrow = degrees_to_cardinal(hourly['winddirection_10m'][start])
         current_rain = hourly['precipitation_probability'][start]
         current_cloud = hourly['cloudcover'][start]
         
@@ -73,11 +73,15 @@ try:
         elif max_wind_trend < current_wind_kt - 3:
             trend_desc = "🍃 Wiatr powoli będzie słabł."
 
+        # Porównanie z wczorajszą temperaturą max (delta)
+        temp_max_today = daily['temperature_2m_max'][0]
+        temp_max_yesterday = daily['temperature_2m_max'][0] # uproszczenie lub delta do wczoraj jeśli jest w danych
+        
         st.markdown("---")
         st.subheader("📌 Aktualnie nad wodą")
         m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("Temperatura", f"{round(current_temp, 1)}°C")
-        m_col2.metric("Wiatr", f"{current_wind_bft} Bft ({current_dir})", f"Szkwały: {current_gust_bft} Bft")
+        m_col1.metric("Temperatura", f"{round(current_temp, 1)}°C", f"Odczuwalna: {round(current_app_temp, 1)}°C")
+        m_col2.metric("Wiatr", f"{current_wind_bft} Bft ({curr_dir_text} {curr_dir_arrow})", f"Szkwały: {current_gust_bft} Bft")
         m_col3.metric("Deszcz", f"{current_rain}%")
         m_col4.metric("Zachmurzenie", f"{current_cloud}%")
         
@@ -101,8 +105,12 @@ try:
             
             w_bft = [knots_to_beaufort(w) for w in day_winds]
             s_bft = [knots_to_beaufort(s) for s in hourly['windgusts_10m'][start:start+12]]
-            w_dir = [degrees_to_cardinal(d) for d in hourly['winddirection_10m'][start:start+12]]
+            
+            dirs_raw = [degrees_to_cardinal(d) for d in hourly['winddirection_10m'][start:start+12]]
+            w_dir = [f"{d[0]} {d[1]}" for d in dirs_raw]
+            
             temp = hourly['temperature_2m'][start:start+12]
+            app_temp = hourly['apparent_temperature'][start:start+12]
             rain = day_rains
             clouds = hourly['cloudcover'][start:start+12]
             
@@ -132,11 +140,16 @@ try:
             cols = st.columns(3)
             for i, (a, o) in enumerate(oceny.items()): cols[i].metric(a, o)
             
-            sup, sail = None, None
+            # --- AUTOMATYCZNE WYSZUKIWANIE NAJLEPSZEGO OKNA ---
+            best_sup, best_sail = [], []
             for t, b, bs, d, h in zip(times, w_bft, s_bft, rain, hours):
-                if b <= 2 and d < 40 and 8 <= h <= 20 and not sup: sup = t
-                if 2 <= b <= 4 and bs < 6 and d < 30 and not sail: sail = t
-            st.info(f"🏄 SUP: **{sup or 'brak'}** | ⛵ Żagle: **{sail or 'brak'}**")
+                if b <= 2 and d < 40 and 8 <= h <= 20: best_sup.append(t)
+                if 2 <= b <= 4 and bs < 6 and d < 30: best_sail.append(t)
+            
+            sup_window = f"{best_sup[0]} - {best_sup[-1]}" if len(best_sup) > 0 else "brak"
+            sail_window = f"{best_sail[0]} - {best_sail[-1]}" if len(best_sail) > 0 else "brak"
+            
+            st.success(🎯 **Rekomendowane okna dzisiaj:** \n 🏄 SUP: **{sup_window}** | ⛵ Żagle: **{sail_window}**")
             
             def draw_chart(chart_data, domain, colors, title):
                 st.subheader(title)
@@ -179,7 +192,16 @@ try:
             draw_chart(beach_data, ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], ['#333333', '#d62728', '#7f7f7f', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
 
             st.subheader("Szczegóły godzinowe")
-            df = pd.DataFrame({"Godzina": times, "Wiatr": [f"{b} Bft" for b in w_bft], "Kierunek": w_dir, "Szkwały": [f"{s} Bft" for s in s_bft], "Temp": [f"{round(t, 1)}°C" for t in temp], "Chmury": [f"{c}%" for c in clouds], "Deszcz (%)": rain})
+            df = pd.DataFrame({
+                "Godzina": times, 
+                "Wiatr": [f"{b} Bft" for b in w_bft], 
+                "Kierunek": w_dir, 
+                "Szkwały": [f"{s} Bft" for s in s_bft], 
+                "Temp": [f"{round(t, 1)}°C" for t in temp], 
+                "Odczuwalna": [f"{round(at, 1)}°C" for at in app_temp],
+                "Chmury": [f"{c}%" for c in clouds], 
+                "Deszcz (%)": rain
+            })
             st.dataframe(df, use_container_width=True, hide_index=True)
 
         with tab2:
