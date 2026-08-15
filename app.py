@@ -8,6 +8,7 @@ st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide"
 
 st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
 
+# Panel przycisków
 btn_col1, btn_col2 = st.columns(2)
 with btn_col1:
     st.link_button("🚗 Dojazd", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
@@ -15,7 +16,6 @@ with btn_col2:
     st.link_button("📹 Kamery online (MOSiR)", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
 
 LAT, LON = "50.555", "21.652"
-# Dodano winddirection_10m do API
 url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,cloudcover&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
 def knots_to_beaufort(kt):
@@ -39,30 +39,64 @@ try:
     response = requests.get(url)
     if response.status_code == 200:
         data = response.json()
+        hourly = data['hourly']
+        daily = data['daily']
+        
+        curr = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
+        start = hourly['time'].index(curr) if curr in hourly['time'] else 0
+        
+        # --- BIEŻĄCA POGODA I TREND NA CAŁY DZIEŃ ---
+        current_temp = hourly['temperature_2m'][start]
+        current_wind_kt = hourly['windspeed_10m'][start]
+        current_wind_bft = knots_to_beaufort(current_wind_kt)
+        current_gust_bft = knots_to_beaufort(hourly['windgusts_10m'][start])
+        current_dir = degrees_to_cardinal(hourly['winddirection_10m'][start])
+        current_rain = hourly['precipitation_probability'][start]
+        current_cloud = hourly['cloudcover'][start]
+        
+        # Analiza trendu na resztę dnia (kolejne 12h)
+        day_winds = hourly['windspeed_10m'][start:start+12]
+        day_rains = hourly['precipitation_probability'][start:start+12]
+        max_wind_trend = max(day_winds)
+        max_rain_trend = max(day_rains)
+        
+        trend_desc = "stabilne warunki przez cały dzień."
+        if max_wind_trend > current_wind_kt + 5:
+            trend_desc = "⚠️ W ciągu dnia wiatr będzie narastał."
+        elif max_rain_trend > 40:
+            trend_desc = "☔ Wzrost ryzyka opadów w ciągu dnia."
+        elif max_wind_trend < current_wind_kt - 3:
+            trend_desc = "🍃 Wiatr powoli będzie słabł."
+
+        st.markdown("---")
+        st.subheader("📌 Aktualnie nad wodą")
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("Temperatura", f"{round(current_temp, 1)}°C")
+        m_col2.metric("Wiatr", f"{current_wind_bft} Bft ({current_dir})", f"Szkwały: {current_gust_bft} Bft")
+        m_col3.metric("Deszcz", f"{current_rain}%")
+        m_col4.metric("Zachmurzenie", f"{current_cloud}%")
+        
+        st.info(f"📈 **Trend na dziś:** {trend_desc}")
+        st.markdown("---")
+
         tab1, tab2 = st.tabs(["Dziś (godzinowo)", "Prognoza na 7 dni"])
         
         with tab1:
-            hourly = data['hourly']
-            daily = data['daily']
-            
             sunset_str = daily['sunset'][0]
             sunset_dt = datetime.fromisoformat(sunset_str)
             max_beach_dt = sunset_dt + timedelta(minutes=30)
             max_beach_hour = max_beach_dt.hour
             max_beach_minute = max_beach_dt.minute
-
-            curr = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
-            start = hourly['time'].index(curr) if curr in hourly['time'] else 0
             
             raw_times = hourly['time'][start:start+12]
             times = [t[-5:] for t in raw_times]
             hours = [int(t[11:13]) for t in raw_times]
             
-            w_bft = [knots_to_beaufort(w) for w in hourly['windspeed_10m'][start:start+12]]
+            w_bft = [knots_to_beaufort(w) for w in day_winds]
             s_bft = [knots_to_beaufort(s) for s in hourly['windgusts_10m'][start:start+12]]
             w_dir = [degrees_to_cardinal(d) for d in hourly['winddirection_10m'][start:start+12]]
             temp = hourly['temperature_2m'][start:start+12]
-            rain = hourly['precipitation_probability'][start:start+12]
+            rain = day_rains
             clouds = hourly['cloudcover'][start:start+12]
             
             st.caption(f"🌅 Dziś słońce zachodzi o **{sunset_dt.strftime('%H:%M')}**. Okno plażowe otwarte do **{max_beach_dt.strftime('%H:%M')}**.")
@@ -105,7 +139,6 @@ try:
                     tooltip=['Godzina', 'Status']
                 ).properties(height=150), use_container_width=True)
 
-            # 1. Żeglarstwo
             sail_data = []
             for t, b, bs, d in zip(times, w_bft, s_bft, rain):
                 if bs >= 6 or d >= 50: sail_data.append({"Godzina": t, "Ocena": 4, "Status": "⚠️ Niebezpiecznie"})
@@ -115,7 +148,6 @@ try:
                 else: sail_data.append({"Godzina": t, "Ocena": 0, "Status": "😶 Cisza"})
             draw_chart(sail_data, ['⚠️ Niebezpiecznie', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], ['#d62728', '#ff7f0e', '#2ca02c', '#87CEEB', '#808080'], "⛵ Ocena żeglarska")
 
-            # 2. SUP
             sup_data = []
             for t, b, d, h in zip(times, w_bft, rain, hours):
                 if h < 7 or h > 20: sup_data.append({"Godzina": t, "Ocena": 0, "Status": "🌙 Noc / Zmierzch"})
@@ -125,7 +157,6 @@ try:
                 else: sup_data.append({"Godzina": t, "Ocena": 1, "Status": "✅ Idealne"})
             draw_chart(sup_data, ['🌙 Noc / Zmierzch', '⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], ['#333333', '#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena SUP")
 
-            # 3. Plażowanie
             beach_data = []
             for t, tm, b, d, c, h in zip(times, temp, w_bft, rain, clouds, hours):
                 if (h > max_beach_hour or (h == max_beach_hour and max_beach_minute > 0)) or h < 9:
@@ -140,7 +171,6 @@ try:
                     beach_data.append({"Godzina": t, "Ocena": 4, "Status": "☀️ Idealne słońce"})
             draw_chart(beach_data, ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], ['#333333', '#d62728', '#7f7f7f', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
 
-            # Tabela (z kierunkiem wiatru)
             st.subheader("Szczegóły godzinowe")
             df = pd.DataFrame({"Godzina": times, "Wiatr": [f"{b} Bft" for b in w_bft], "Kierunek": w_dir, "Szkwały": [f"{s} Bft" for s in s_bft], "Temp": [f"{round(t, 1)}°C" for t in temp], "Chmury": [f"{c}%" for c in clouds], "Deszcz (%)": rain})
             st.dataframe(df, use_container_width=True, hide_index=True)
