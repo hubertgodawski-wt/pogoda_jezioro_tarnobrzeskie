@@ -7,16 +7,10 @@ st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide"
 st.title("🌊 Warunki na wodzie")
 st.link_button("🚗 Sprawdź korki dojazdowe", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie")
 
-# Zabezpieczenie przed niewidocznymi spacjami przy kopiowaniu
-SPOT_ID = "30390".strip()
-url = f"https://www.windguru.cz/int/iapi.php?q=forecast&id_spot={SPOT_ID}"
-
-# Pełny nagłówek udający prawdziwą przeglądarkę (omija zabezpieczenia przed botami)
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": f"https://www.windguru.cz/{SPOT_ID}",
-    "Accept": "application/json"
-}
+# Używamy Open-Meteo (całkowicie darmowe i stabilne) ze współrzędnymi Jeziora Tarnobrzeskiego
+LAT = "50.555"
+LON = "21.652"
+url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=2"
 
 def ocena_aktywnosci(wiatr, szkwal, temp):
     oceny = {}
@@ -35,28 +29,32 @@ def ocena_aktywnosci(wiatr, szkwal, temp):
     return oceny
 
 try:
-    response = requests.get(url, headers=headers)
+    response = requests.get(url)
     
     if response.status_code == 200:
         data = response.json()
+        hourly = data['hourly']
         
-        # NOWOŚĆ: Zabezpieczenie, które pokaże Ci dokładny powód, jeśli Windguru nie wyśle pogody
-        if 'fcst' not in data:
-            st.error("Serwer odrzucił zapytanie i nie zwrócił danych. Poniżej znajduje się to, co nam odesłał:")
-            st.json(data)
-            st.stop()
+        # Pobieramy obecną godzinę w strefie czasowej dla Polski
+        current_time_str = pd.Timestamp.now(tz='Europe/Warsaw').strftime('%Y-%m-%dT%H:00')
+        
+        # Znajdujemy od którego momentu na liście zaczyna się nasza godzina
+        if current_time_str in hourly['time']:
+            start_idx = hourly['time'].index(current_time_str)
+        else:
+            start_idx = 0
             
-        model_key = list(data['fcst'].keys())[0]
-        forecast = data['fcst'][model_key]
+        # Wyciągamy dane na 6 najbliższych godzin
+        times = hourly['time'][start_idx:start_idx+6]
+        wiatr = hourly['windspeed_10m'][start_idx:start_idx+6]
+        szkwal = hourly['windgusts_10m'][start_idx:start_idx+6]
+        temp = hourly['temperature_2m'][start_idx:start_idx+6]
         
-        limit = min(6, len(forecast.get('hr_h', [])))
-        wiatr = forecast.get('WINDSPD', [])[:limit]
-        szkwal = forecast.get('GUST', [])[:limit]
-        temp = forecast.get('TMP', [])[:limit]
+        # Formatujemy godziny, żeby w tabeli wyglądały ładnie (np. z "2023-10-25T14:00" robimy "14:00")
+        formatted_times = [t[-5:] for t in times]
         
         st.subheader("Ocena warunków (na teraz)")
-        # Zabezpieczenie na wypadek brakujących danych w pierwszej kolumnie
-        oceny = ocena_aktywnosci(wiatr[0] if wiatr else 0, szkwal[0] if szkwal else 0, temp[0] if temp else 0)
+        oceny = ocena_aktywnosci(wiatr[0], szkwal[0], temp[0])
         
         cols = st.columns(3)
         for i, (aktywnosc, ocena) in enumerate(oceny.items()):
@@ -64,13 +62,15 @@ try:
         
         st.subheader("Prognoza godzinowa")
         df = pd.DataFrame({
-            "Godzina": forecast.get('hr_h', [])[:limit], 
-            "Wiatr (węzły)": wiatr, 
-            "Szkwały": szkwal, 
-            "Temp": temp
+            "Godzina": formatted_times, 
+            "Wiatr (węzły)": [round(w, 1) for w in wiatr], 
+            "Szkwały": [round(s, 1) for s in szkwal], 
+            "Temp (°C)": [round(t, 1) for t in temp]
         })
+        
+        # Wyświetlamy tabelę rozciągniętą na całą szerokość ekranu
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        st.error(f"Błąd połączenia z serwerem. Kod statusu: {response.status_code}")
+        st.error("Błąd pobierania danych pogodowych z serwerów Open-Meteo.")
 except Exception as e:
-    st.error(f"Problem: {e}")
+    st.error(f"Wystąpił nieoczekiwany problem: {e}")
