@@ -7,6 +7,7 @@ st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide"
 
 st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
 
+# Panel przycisków
 btn_col1, btn_col2 = st.columns(2)
 with btn_col1:
     st.link_button("🚗 Dojazd", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
@@ -17,6 +18,7 @@ LAT = "50.555"
 LON = "21.652"
 url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
 
+# --- FUNKCJE ---
 def knots_to_beaufort(kt):
     if kt < 1: return 0
     elif kt <= 3: return 1
@@ -50,6 +52,7 @@ def plot_chart(data, domain, range_colors, title):
         tooltip=['Godzina', 'Status']
     ).properties(height=150), use_container_width=True)
 
+# --- LOGIKA ---
 try:
     response = requests.get(url)
     if response.status_code == 200:
@@ -70,7 +73,6 @@ try:
             w_bft = [knots_to_beaufort(w) for w in w_kt]
             s_bft = [knots_to_beaufort(s) for s in s_kt]
             
-            # Metryki i Rekomendacje
             cols = st.columns(3)
             oceny = ocena_aktywnosci(w_bft[0], s_bft[0], temp[0], rain[0])
             for i, (a, o) in enumerate(oceny.items()): cols[i].metric(a, o)
@@ -81,19 +83,18 @@ try:
                 if 2 <= b <= 4 and bs < 6 and d < 30 and not sail: sail = t
             st.info(f"🏄 SUP: **{sup or 'brak'}** | ⛵ Żagle: **{sail or 'brak'}**")
             
-            # Wykresy szczegółowe
+            # Wykresy (zaktualizowane progi)
             plot_chart([{"Godzina": t, "Ocena": (4 if bs>=6 or d>=50 else (3 if b>=5 else (2 if 2<=b<=4 and bs<6 and d<30 else (1 if b==1 else 0)))), "Status": ("⚠️ Niebezpiecznie" if bs>=6 or d>=50 else ("⛵ Wymagający" if b>=5 else ("✅ Idealne" if 2<=b<=4 and bs<6 and d<30 else ("🐢 Zbyt słabo" if b==1 else "😶 Cisza"))))} for t, b, bs, d in zip(fmt_t, w_bft, s_bft, rain)], 
                        ['⚠️ Niebezpiecznie', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], ['#d62728', '#ff7f0e', '#2ca02c', '#87CEEB', '#808080'], "⛵ Żeglarstwo")
             
-            plot_chart([{"Godzina": t, "Ocena": (3 if d>=50 else (2 if b>2 else (1 if b==2 else 0))), "Status": ("⚠️ Unikaj" if d>=50 else ("⛵ Trudno" if b>2 else ("🐢 Wymagająco" if b==2 else "✅ Idealnie")))} for t, b, d in zip(fmt_t, w_bft, rain)], 
-                       ['⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealnie'], ['#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 SUP")
+            plot_chart([{"Godzina": t, "Ocena": (3 if d>=50 else (2 if b>3 else (1 if b==3 else 0))), "Status": ("⚠️ Unikaj" if d>=50 else ("⛵ Trudno" if b>3 else ("🐢 Wymagająco" if b==3 else "✅ Idealnie")))} for t, b, d in zip(fmt_t, w_bft, rain)], 
+                       ['⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealnie'], ['#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena SUP")
             
             plot_chart([{"Godzina": t, "Ocena": (3 if d>=50 else (2 if tm<20 else (1 if b>3 else 0))), "Status": ("⚠️ Unikaj" if d>=50 else ("❄️ Chłodno" if tm<20 else ("🌬️ Wietrznie" if b>3 else "✅ Idealnie")))} for t, tm, b, d in zip(fmt_t, temp, w_bft, rain)], 
-                       ['⚠️ Unikaj', '❄️ Chłodno', '🌬️ Wietrznie', '✅ Idealnie'], ['#d62728', '#1f77b4', '#ff7f0e', '#2ca02c'], "🏖️ Plażowanie")
+                       ['⚠️ Unikaj', '❄️ Chłodno', '🌬️ Wietrznie', '✅ Idealnie'], ['#d62728', '#1f77b4', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
 
-            # Tabela szczegółowa
             st.subheader("Szczegóły godzinowe")
-            st.dataframe(pd.DataFrame({"Godzina": fmt_t, "Wiatr (Bft)": w_bft, "Szkwały": s_bft, "Temp": [f"{round(t, 1)}°C" for t in temp], "Deszcz (%)": rain}), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame({"Godzina": fmt_t, "Wiatr": [f"{b} Bft" for b in w_bft], "Szkwały": [f"{bs} Bft" for bs in s_bft], "Temp": [f"{round(t, 1)}°C" for t in temp], "Deszcz (%)": rain}), use_container_width=True, hide_index=True)
 
         with tab2:
             st.subheader("Prognoza na 7 dni")
