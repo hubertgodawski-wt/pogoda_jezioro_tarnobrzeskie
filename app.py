@@ -47,10 +47,10 @@ def ocena_aktywnosci(bft, bft_szkwal, temp, deszcz):
     return oceny
 
 def ocena_zeglarska_szczegolowa(bft, bft_szkwal, deszcz):
-    """Zwraca unikalny wynik punktowy dla każdego stanu, aby wykres był precyzyjny"""
+    """Zwraca unikalny wynik punktowy dla każdego stanu"""
     if bft_szkwal >= 6 or deszcz >= 50: return 4, "⚠️ Niebezpiecznie"
-    elif 2 <= bft <= 4 and bft_szkwal < 6 and deszcz < 30: return 3, "✅ Idealne warunki"
-    elif bft == 5: return 2, "⛵ Wymagający wiatr"
+    elif bft >= 5: return 3, "⛵ Wymagający wiatr"
+    elif 2 <= bft <= 4 and bft_szkwal < 6 and deszcz < 30: return 2, "✅ Idealne warunki"
     elif bft == 1: return 1, "🐢 Zbyt słabo"
     else: return 0, "😶 Cisza / Słaby wiatr"
 
@@ -91,13 +91,12 @@ try:
             st.subheader("Ocena żeglarska godzinowa")
             sail_data = [{"Godzina": t, "Ocena": ocena_zeglarska_szczegolowa(b, bs, d)[0], "Status": ocena_zeglarska_szczegolowa(b, bs, d)[1]} for t, b, bs, d in zip(fmt_t, w_bft, s_bft, rain)]
             
-            # Wykres z wyraźną skalą (0-4)
             st.altair_chart(alt.Chart(pd.DataFrame(sail_data)).mark_bar().encode(
                 x='Godzina:N', 
                 y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4])), 
                 color=alt.Color('Status:N', scale=alt.Scale(
-                    domain=['⚠️ Niebezpiecznie', '✅ Idealne warunki', '⛵ Wymagający wiatr', '🐢 Zbyt słabo', '😶 Cisza / Słaby wiatr'],
-                    range=['#d62728', '#2ca02c', '#1f77b4', '#ff7f0e', '#7f7f7f']
+                    domain=['⚠️ Niebezpiecznie', '⛵ Wymagający wiatr', '✅ Idealne warunki', '🐢 Zbyt słabo', '😶 Cisza / Słaby wiatr'],
+                    range=['#d62728', '#ff7f0e', '#2ca02c', '#87CEEB', '#808080']
                 )),
                 tooltip=['Godzina', 'Status']
             ).properties(height=200), use_container_width=True)
@@ -116,8 +115,8 @@ try:
             daily_data = []
             for t, w, r in zip(daily['time'], daily['windspeed_10m_max'], daily['precipitation_sum']):
                 bft = knots_to_beaufort(w)
-                # Szczegółowa ocena dla dniówki
-                if bft >= 6 or r > 5.0: status = "⚠️ Niebezpiecznie / Sztormowo"
+                # Spójna logika kolorystyczna
+                if bft >= 6 or r > 5.0: status = "⚠️ Niebezpiecznie"
                 elif bft == 5: status = "⛵ Wymagający wiatr"
                 elif 2 <= bft <= 4 and r < 2.0: status = "✅ Idealne warunki"
                 elif bft == 1: status = "🐢 Zbyt słabo"
@@ -127,5 +126,5 @@ try:
             
             st.dataframe(pd.DataFrame(daily_data), use_container_width=True, hide_index=True)
 
-    else: st.error("Błąd połączenia.")
+    else: st.error("Błąd pobierania danych.")
 except Exception as e: st.error(f"Błąd: {e}")
