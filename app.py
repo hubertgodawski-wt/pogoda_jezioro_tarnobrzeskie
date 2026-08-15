@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import altair as alt
 
 st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide")
 
@@ -41,7 +42,7 @@ try:
         else:
             start_idx = 0
             
-        times = hourly['time'][start_idx:start_idx+12] # Pobieramy 12 godzin do analizy
+        times = hourly['time'][start_idx:start_idx+12]
         wiatr = hourly['windspeed_10m'][start_idx:start_idx+12]
         szkwal = hourly['windgusts_10m'][start_idx:start_idx+12]
         temp = hourly['temperature_2m'][start_idx:start_idx+12]
@@ -55,20 +56,16 @@ try:
         for i, (aktywnosc, ocena) in enumerate(oceny.items()):
             cols[i].metric(aktywnosc, ocena)
             
-        # --- ALGORYTM ZNAJDUJĄCY NAJLEPSZY CZAS ---
         najlepszy_sup = None
         najlepszy_zeglarz = None
         min_wiatr_sup = 999
         najlepszy_wynik_zeglarz = -1
         
         for t, w, s in zip(formatted_times, wiatr, szkwal):
-            # Dla SUP: szukamy najmniejszego wiatru (najgładziej na wodzie)
             if w < min_wiatr_sup:
                 min_wiatr_sup = w
                 najlepszy_sup = t
-            # Dla Żeglarstwa: szukamy wiatru w przedziale 6-14 węzłów z małymi szkwałami
             if 5 <= w <= 15 and s < 20:
-                # Punktacja: im bliżej 10 węzłów, tym lepiej
                 score = 10 - abs(10 - w)
                 if score > najlepszy_wynik_zeglarz:
                     najlepszy_wynik_zeglarz = score
@@ -77,17 +74,27 @@ try:
         st.info(f"💡 **Sugerowane okno czasowe na dziś:**\n\n"
                 f"🏄 **Najlepszy moment na SUP:** ok. **{najlepszy_sup}** (najspokojniejsza woda)\n\n"
                 f"⛵ **Najlepszy moment na żagle:** ok. **{najlepszy_zeglarz if najlepszy_zeglarz else 'brak idealnych warunków'}**")
-        # ------------------------------------------
         
         st.divider()
         st.subheader("Wykres wiatru i szkwałów")
         
-        chart_data = pd.DataFrame({
-            "Wiatr (węzły)": [round(w, 1) for w in wiatr], 
-            "Szkwały (węzły)": [round(s, 1) for s in szkwal]
-        }, index=formatted_times)
+        # Przygotowanie danych w formacie odpowiednim dla stabilnego wykresu Altair
+        chart_df = pd.DataFrame({
+            "Godzina": formatted_times * 2,
+            "Węzły": [round(w, 1) for w in wiatr] + [round(s, 1) for s in szkwal],
+            "Typ": ["Wiatr (kt)"] * len(wiatr) + ["Szkwały (kt)"] * len(szkwal)
+        })
         
-        st.area_chart(chart_data)
+        # Wykres zablokowany przed przypadkowym zoomowaniem dotykowym z automatyczną skalą Y
+        chart = alt.Chart(chart_df).mark_area(opacity=0.4).encode(
+            x=alt.X('Godzina:N', title='Godzina', sort=None),
+            y=alt.Y('Węzły:Q', title='Węzły (kt)', scale=alt.Scale(zero=True)),
+            color=alt.Color('Typ:N', title='', scale=alt.Scale(range=['#1f77b4', '#ff7f0e']))
+        ).properties(
+            height=260
+        )
+        
+        st.altair_chart(chart, use_container_width=True)
         
         st.subheader("Szczegóły godzinowe")
         df = pd.DataFrame({
