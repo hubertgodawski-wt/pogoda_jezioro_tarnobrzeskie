@@ -51,11 +51,11 @@ def ocena_aktywnosci(bft, bft_szkwal, temp, deszcz):
     return oceny
 
 def ocena_zeglarska_punktowa(bft, bft_szkwal, deszcz):
-    if bft_szkwal >= 6 or deszcz >= 50: return 0, "Niebezpiecznie"
+    if bft_szkwal >= 6 or deszcz >= 50: return 0, "Niebezpiecznie (szkwały/deszcz)"
     elif 2 <= bft <= 4 and bft_szkwal < 6 and deszcz < 30: return 3, "Idealne warunki"
     elif bft == 5: return 2, "Wymagający wiatr"
     elif bft == 1: return 1, "Zbyt słabo"
-    else: return 0, "Cisza"
+    else: return 0, "Cisza / Słaby wiatr"
 
 # --- LOGIKA ---
 try:
@@ -79,22 +79,19 @@ try:
             w_bft = [knots_to_beaufort(w) for w in w_kt]
             s_bft = [knots_to_beaufort(s) for s in s_kt]
             
-            # Metryki
             cols = st.columns(3)
             oceny = ocena_aktywnosci(w_bft[0], s_bft[0], temp[0], rain[0])
             for i, (a, o) in enumerate(oceny.items()): cols[i].metric(a, o)
             
-            # Rekomendacja
             sup, sail = None, None
             for t, b, bs, d in zip(fmt_t, w_bft, s_bft, rain):
                 if b < 2 and d < 40 and not sup: sup = t
                 if 2 <= b <= 4 and bs < 6 and d < 30 and not sail: sail = t
             st.info(f"🏄 SUP: **{sup or 'brak'}** | ⛵ Żagle: **{sail or 'brak'}**")
             
-            # Wykresy
-            st.subheader("Ocena żeglarska")
+            st.subheader("Ocena żeglarska godzinowa")
             sail_data = [{"Godzina": t, "Ocena": ocena_zeglarska_punktowa(b, bs, d)[0], "Status": ocena_zeglarska_punktowa(b, bs, d)[1]} for t, b, bs, d in zip(fmt_t, w_bft, s_bft, rain)]
-            st.altair_chart(alt.Chart(pd.DataFrame(sail_data)).mark_bar().encode(x='Godzina:N', y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0,3])), color='Status:N').properties(height=150), use_container_width=True)
+            st.altair_chart(alt.Chart(pd.DataFrame(sail_data)).mark_bar().encode(x='Godzina:N', y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0,3])), color='Status:N', tooltip=['Godzina', 'Status']).properties(height=150), use_container_width=True)
             
             st.subheader("Pogoda (Wiatr i Szkwały)")
             wind_df = pd.DataFrame({"Godzina": fmt_t*2, "Bft": w_bft+s_bft, "Typ": ["Wiatr"]*12+["Szkwały"]*12})
@@ -110,9 +107,17 @@ try:
             daily_data = []
             for t, w, r in zip(daily['time'], daily['windspeed_10m_max'], daily['precipitation_sum']):
                 bft = knots_to_beaufort(w)
-                status = "⛵ Idealnie" if (2 <= bft <= 4 and r < 2.0) else ("Trudne" if bft >= 5 or r > 2 else "Słabo")
+                # Bardziej szczegółowa logika dla dniówki
+                if bft >= 6 or r > 5.0: status = "⚠️ Niebezpiecznie / Sztormowo"
+                elif bft == 5: status = "⛵ Wymagający wiatr"
+                elif 2 <= bft <= 4 and r < 2.0: status = "⛵ Idealne warunki"
+                elif bft == 1: status = "🐢 Zbyt słabo"
+                else: status = "Cisza / Słaby wiatr"
+                
                 daily_data.append({"Data": t, "Temp": f"{round(daily['temperature_2m_max'][daily['time'].index(t)], 1)}°C", "Wiatr": f"{bft} Bft", "Deszcz": f"{round(r, 1)} mm", "Ocena": status})
+            
             st.dataframe(pd.DataFrame(daily_data), use_container_width=True, hide_index=True)
+            st.info("💡 Kliknij nagłówki kolumn w tabeli, aby posortować dni.")
 
-    else: st.error("Błąd połączenia.")
+    else: st.error("Błąd pobierania danych.")
 except Exception as e: st.error(f"Błąd: {e}")
