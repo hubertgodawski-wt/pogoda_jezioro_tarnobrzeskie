@@ -9,17 +9,14 @@ st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide"
 # --- WŁASNY CSS POWIĘKSZAJĄCY KAFELKI (METRYKI) ---
 st.markdown("""
     <style>
-    /* Powiększenie etykiet metryk */
     [data-testid="stMetricLabel"] {
         font-size: 1.1rem !important;
         font-weight: 600 !important;
     }
-    /* Powiększenie głównych cyfr w metrykach */
     [data-testid="stMetricValue"] {
         font-size: 2.3rem !important;
         font-weight: 700 !important;
     }
-    /* Powiększenie podpisu/delty pod metryką */
     [data-testid="stMetricDelta"] {
         font-size: 1rem !important;
     }
@@ -125,7 +122,6 @@ try:
         else:
             st.success("✅ **Werdykt na teraz:** Brak poważnych ostrzeżeń meteorologicznych na najbliższe godziny.")
 
-        # Wyraziste, duże kafelki metryk
         m_col1, m_col2, m_col3, m_col4 = st.columns(4)
         m_col1.metric("Temperatura", f"{round(current_temp, 1)}°C", f"Odczuwalna: {round(current_app_temp, 1)}°C")
         m_col2.metric("Wiatr", f"{current_wind_bft} Bft ({curr_dir_text} {curr_dir_arrow})", f"Szkwały: {current_gust_bft} Bft")
@@ -224,23 +220,55 @@ try:
             st.dataframe(df, use_container_width=True, hide_index=True)
 
         with tab2:
-            st.subheader("Prognoza na 7 dni")
+            st.subheader("📅 Kafelkowa prognoza na 7 dni")
             daily = data['daily']
-            daily_data = []
-            for i, t in enumerate(daily['time']):
+            
+            # Tworzymy rząd kolumn dla kolejnych dni (np. po 7 dni)
+            days_count = len(daily['time'])
+            cols = st.columns(days_count)
+            
+            for i, col in enumerate(cols):
+                t = daily['time'][i]
                 w = daily['windspeed_10m_max'][i]
                 r = daily['precipitation_sum'][i]
                 bft = knots_to_beaufort(w)
-                status = "⚠️ Niebezpiecznie" if bft>=6 or r>5 else ("⛵ Wymagający" if bft==5 else ("✅ Idealne" if 2<=bft<=4 and r<2 else ("🐢 Zbyt słabo" if bft==1 else "😶 Cisza")))
-                daily_data.append({
-                    "Data": t, 
-                    "Temp Max": f"{round(daily['temperature_2m_max'][i], 1)}°C", 
-                    "Wschód": daily['sunrise'][i][-5:], 
-                    "Zachód": daily['sunset'][i][-5:], 
-                    "Wiatr Max": f"{bft} Bft", 
-                    "Ocena": status
-                })
-            st.dataframe(pd.DataFrame(daily_data), use_container_width=True, hide_index=True)
+                temp_max = round(daily['temperature_2m_max'][i], 1)
+                sunrise = daily['sunrise'][i][-5:]
+                sunset = daily['sunset'][i][-5:]
+                
+                # Ocena dnia
+                if bft >= 6 or r > 5:
+                    status = "⚠️ Niebezpiecznie"
+                    box_color = "red"
+                elif bft == 5:
+                    status = "⛵ Wymagający"
+                    box_color = "orange"
+                elif 2 <= bft <= 4 and r < 2:
+                    status = "✅ Idealne"
+                    box_color = "green"
+                elif bft == 1:
+                    status = "🐢 Zbyt słabo"
+                    box_color = "blue"
+                else:
+                    status = "😶 Cisza"
+                    box_color = "gray"
+
+                with col:
+                    st.markdown(f"### **{t}**")
+                    st.metric("Temp Max", f"{temp_max}°C")
+                    st.write(f"💨 **Wiatr Max:** {bft} Bft")
+                    st.write(f"🌧️ **Deszcz:** {r} mm")
+                    st.write(f"🌅 {sunrise} | 🌇 {sunset}")
+                    
+                    # Kolorowe podsumowanie statusu w kafelku
+                    if box_color == "green":
+                        st.success(status)
+                    elif box_color == "red":
+                        st.error(status)
+                    elif box_color == "orange":
+                        st.warning(status)
+                    else:
+                        st.info(status)
 
     else: st.error("Błąd pobierania danych.")
 except Exception as e: st.error(f"Błąd: {e}")
