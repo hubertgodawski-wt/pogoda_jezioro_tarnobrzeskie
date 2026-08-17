@@ -85,6 +85,7 @@ try:
         'Wiatr_Bft': [knots_to_beaufort(w) for w in hourly['windspeed_10m'][start_idx : start_idx+12]],
         'Szkwały_Bft': [knots_to_beaufort(w) for w in hourly['windgusts_10m'][start_idx : start_idx+12]],
         'Kierunek_Str': [f"{degrees_to_cardinal(d)[0]} {degrees_to_cardinal(d)[1]}" for d in hourly['winddirection_10m'][start_idx : start_idx+12]],
+        'Kierunek': [degrees_to_cardinal(d)[0] for d in hourly['winddirection_10m'][start_idx : start_idx+12]], # Zabezpieczenie przed błędem z kierunkiem
         'Temp': hourly['temperature_2m'][start_idx : start_idx+12],
         'Odczuwalna': hourly['apparent_temperature'][start_idx : start_idx+12],
         'Deszcz_Prob': hourly['precipitation_probability'][start_idx : start_idx+12],
@@ -94,7 +95,6 @@ try:
         'UV': hourly['uv_index'][start_idx : start_idx+12] if 'uv_index' in hourly else [0]*12
     })
 
-    # --- ELASTYCZNA LOGIKA OPADÓW ---
     def eval_sail(row):
         if row['Szkwały_Bft'] >= 6 or row['Deszcz_mm'] > 1.0: return 4, "⚠️ Niebezpiecznie", f"Szkwały {row['Szkwały_Bft']} Bft lub ulewa"
         if row['Wiatr_Bft'] >= 5: return 3, "⛵ Wymagający", f"Silny wiatr {row['Wiatr_Bft']} Bft"
