@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide")
 
-# --- WŁASNY CSS POWIĘKSZAJĄCY KAFELKI (METRYKI) ---
+# --- WŁASNY CSS POWIĘKSZAJĄCY KAFELKI I WYKRESY ---
 st.markdown("""
     <style>
     [data-testid="stMetricLabel"] {
@@ -172,11 +172,16 @@ try:
                 df_chart = pd.DataFrame(chart_data)
                 
                 base = alt.Chart(df_chart).mark_bar().encode(
-                    x=alt.X('Godzina:N', title='Godzina'),
-                    y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4]), title='Ocena'),
-                    color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors), title='Status'),
+                    x=alt.X('Godzina:N', title='Godzina', axis=alt.Axis(labelColor='white', titleColor='white')),
+                    y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4]), title='Ocena', axis=alt.Axis(labelColor='white', titleColor='white')),
+                    color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors), title='Status', legend=alt.Legend(labelColor='white', titleColor='white')),
                     tooltip=['Godzina', 'Status', 'Opis']
-                ).properties(height=160)
+                ).properties(
+                    height=160,
+                    background='transparent'
+                ).configure_view(
+                    stroke=None
+                )
 
                 chart = base.add_params(select_hour).encode(
                     opacity=alt.condition(select_hour, alt.value(1), alt.value(0.7))
@@ -184,7 +189,7 @@ try:
                 
                 st.altair_chart(chart, use_container_width=True)
 
-            # 1. Żeglarstwo (Jasne, czytelne kolory na ciemnym tle)
+            # 1. Żeglarstwo (Bardzo jaskrawe, widoczne kolory)
             sail_data = []
             for t, b, bs, d in zip(times, w_bft, s_bft, rain):
                 if bs >= 6 or d >= 50: desc, score, stat = f"Szkwały {bs} Bft lub deszcz {d}%", 4, "⚠️ Niebezpiecznie"
@@ -196,7 +201,7 @@ try:
             draw_interactive_chart(
                 sail_data, 
                 ['⚠️ Niebezpiecznie', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], 
-                ['#ff4b4b', '#ffa500', '#00cc96', '#33ccff', '#b0c4de'], # Zmieniono szary na wyrazisty jasny błękit/stalowy (#b0c4de)
+                ['#ff3333', '#ff9900', '#00ffcc', '#00bfff', '#b0e0e6'], 
                 "⛵ Ocena żeglarska (kliknij słupek, aby zobaczyć szczegóły)"
             )
 
@@ -212,7 +217,7 @@ try:
             draw_interactive_chart(
                 sup_data, 
                 ['🌙 Noc / Zmierzch', '⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], 
-                ['#ab82ff', '#ff4b4b', '#ffa500', '#33ccff', '#00cc96'], # Zmieniono ciemny grafit na jasny fiolet (#ab82ff) widoczny w nocy
+                ['#da70d6', '#ff3333', '#ff9900', '#00bfff', '#00ffcc'], 
                 "🏄 Ocena SUP"
             )
 
@@ -234,7 +239,7 @@ try:
             draw_interactive_chart(
                 beach_data, 
                 ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], 
-                ['#ab82ff', '#ff4b4b', '#a9a9a9', '#ffa500', '#00cc96'], # Rozjaśniono chmury i dodano jasny fiolet dla zmierzchu
+                ['#da70d6', '#ff3333', '#d3d3d3', '#ff9900', '#00ffcc'], 
                 "🏖️ Ocena plażowania"
             )
 
