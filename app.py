@@ -90,7 +90,6 @@ try:
         max_wind_trend = max(day_winds)
         max_rain_trend = max(day_rains)
         max_gust_trend = max(day_gusts)
-        max_cape_trend = max(day_capes) if day_capes else 0
         
         trend_desc = "stabilne warunki przez cały dzień."
         if max_wind_trend > current_wind_kt + 5:
@@ -140,7 +139,6 @@ try:
             sunset_dt = datetime.fromisoformat(sunset_str)
             max_beach_dt = sunset_dt + timedelta(minutes=30)
             max_beach_hour = max_beach_dt.hour
-            max_beach_minute = max_beach_dt.minute
             
             w_bft = [knots_to_beaufort(w) for w in day_winds]
             s_bft = [knots_to_beaufort(s) for s in day_gusts]
@@ -172,43 +170,43 @@ try:
                 df_chart = pd.DataFrame(chart_data)
                 
                 base = alt.Chart(df_chart).mark_bar().encode(
-                    x=alt.X('Godzina:N', title='Godzina', axis=alt.Axis(labelColor='white', titleColor='white')),
-                    y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4]), title='Ocena', axis=alt.Axis(labelColor='white', titleColor='white')),
-                    color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors), title='Status', legend=alt.Legend(labelColor='white', titleColor='white')),
+                    x=alt.X('Godzina:N', title='Godzina'),
+                    y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4]), title='Ocena'),
+                    color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors), title='Status'),
                     tooltip=['Godzina', 'Status', 'Opis']
                 ).properties(
                     height=160,
                     background='transparent'
-                ).configure_view(
-                    stroke=None
                 )
 
                 chart = base.add_params(select_hour).encode(
                     opacity=alt.condition(select_hour, alt.value(1), alt.value(0.7))
                 )
                 
-                st.altair_chart(chart, use_container_width=True)
+                # Dodano theme=None aby zablokować narzucanie kolorów przez Streamlit
+                st.altair_chart(chart, use_container_width=True, theme=None)
 
-            # 1. Żeglarstwo (Bardzo jaskrawe, widoczne kolory)
+            # 1. Żeglarstwo (Cisza dostała wysokość 0.4 i neonowy fiolet, żeby była widoczna jako próg)
             sail_data = []
             for t, b, bs, d in zip(times, w_bft, s_bft, rain):
                 if bs >= 6 or d >= 50: desc, score, stat = f"Szkwały {bs} Bft lub deszcz {d}%", 4, "⚠️ Niebezpiecznie"
                 elif b >= 5: desc, score, stat = f"Wiatr wiodący {b} Bft (wymagający)", 3, "⛵ Wymagający"
                 elif 2 <= b <= 4 and bs < 6 and d < 30: desc, score, stat = f"Wiatr {b} Bft, szkwały {bs} Bft, deszcz {d}%", 2, "✅ Idealne"
                 elif b == 1: desc, score, stat = f"Słaby wiatr ({b} Bft)", 1, "🐢 Zbyt słabo"
-                else: desc, score, stat = f"Cisza na wodzie", 0, "😶 Cisza"
+                else: desc, score, stat = f"Cisza na wodzie", 0.4, "😶 Cisza"
                 sail_data.append({"Godzina": t, "Ocena": score, "Status": stat, "Opis": desc})
             draw_interactive_chart(
                 sail_data, 
                 ['⚠️ Niebezpiecznie', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], 
-                ['#ff3333', '#ff9900', '#00ffcc', '#00bfff', '#b0e0e6'], 
+                ['#ff3333', '#ff9900', '#00ffcc', '#00bfff', '#ab82ff'], 
                 "⛵ Ocena żeglarska (kliknij słupek, aby zobaczyć szczegóły)"
             )
 
-            # 2. SUP
+            # 2. SUP (Noc dostała wysokość 0.4 i neonowy fiolet)
             sup_data = []
             for t, b, d, h in zip(times, w_bft, rain, hours):
-                if h < 7 or h > 20: desc, score, stat = "Poza godzinami dozwolonymi (noc/zmierzch)", 0, "🌙 Noc / Zmierzch"
+                h_now_eval = int(t[:2])
+                if h_now_eval > 20 or h_now_eval < 7: desc, score, stat = "Poza godzinami dozwolonymi (noc/zmierzch)", 0.4, "🌙 Noc / Zmierzch"
                 elif d >= 50: desc, score, stat = f"Wysokie prawdopodobieństwo deszczu ({d}%)", 4, "⚠️ Unikaj"
                 elif b > 3: desc, score, stat = f"Za duży wiatr dla SUP ({b} Bft)", 3, "⛵ Trudno"
                 elif b == 3: desc, score, stat = f"Wiatr w granicach 3 Bft (wymagająco)", 2, "🐢 Wymagająco"
@@ -217,16 +215,16 @@ try:
             draw_interactive_chart(
                 sup_data, 
                 ['🌙 Noc / Zmierzch', '⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], 
-                ['#da70d6', '#ff3333', '#ff9900', '#00bfff', '#00ffcc'], 
+                ['#ab82ff', '#ff3333', '#ff9900', '#00bfff', '#00ffcc'], 
                 "🏄 Ocena SUP"
             )
 
-            # 3. Plażowanie
+            # 3. Plażowanie (Po zachodzie słońca dostało wysokość 0.4)
             beach_data = []
             for t, tm, b, d, c, h in zip(times, temp, w_bft, rain, clouds, hours):
                 h_now_eval = int(t[:2])
-                if (h_now_eval > max_beach_hour or (h_now_eval == max_beach_hour and max_beach_minute > 0)) or h < 9:
-                    desc, score, stat = "Po zachodzie słońca lub rano", 0, "🌙 Po zachodzie słońca"
+                if h_now_eval > max_beach_hour or h_now_eval < 9:
+                    desc, score, stat = "Po zachodzie słońca lub wcześnie rano", 0.4, "🌙 Po zachodzie słońca"
                 elif d >= 50 or tm < 16:
                     desc, score, stat = f"Chłodno ({tm}°C) lub ryzyko deszczu ({d}%)", 1, "⚠️ Unikaj / Chłodno"
                 elif c >= 70:
@@ -239,7 +237,7 @@ try:
             draw_interactive_chart(
                 beach_data, 
                 ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], 
-                ['#da70d6', '#ff3333', '#d3d3d3', '#ff9900', '#00ffcc'], 
+                ['#ab82ff', '#ff3333', '#a9a9a9', '#ff9900', '#00ffcc'], 
                 "🏖️ Ocena plażowania"
             )
 
