@@ -165,46 +165,64 @@ try:
             
             st.info(f"🎯 **Rekomendowane okna dzisiaj:** 🏄 SUP: **{sup_window}** | ⛵ Żagle: **{sail_window}**")
             
-            def draw_chart(chart_data, domain, colors, title):
-                st.subheader(title)
-                st.altair_chart(alt.Chart(pd.DataFrame(chart_data)).mark_bar().encode(
-                    x='Godzina:N', y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4])), 
-                    color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors)),
-                    tooltip=['Godzina', 'Status']
-                ).properties(height=150), use_container_width=True)
+            # --- INTERAKTYWNA SELEKCJA WYKRESU ---
+            select_hour = alt.selection_point(fields=['Godzina'], nearest=True, on='click', empty='none')
 
+            def draw_interactive_chart(chart_data, domain, colors, title):
+                st.subheader(title)
+                df_chart = pd.DataFrame(chart_data)
+                
+                base = alt.Chart(df_chart).mark_bar().encode(
+                    x=alt.X('Godzina:N', title='Godzina'),
+                    y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4]), title='Ocena'),
+                    color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors), title='Status'),
+                    tooltip=['Godzina', 'Status', 'Opis']
+                ).properties(height=160)
+
+                chart = base.add_params(select_hour).encode(
+                    opacity=alt.condition(select_hour, alt.value(1), alt.value(0.7))
+                )
+                
+                st.altair_chart(chart, use_container_width=True)
+
+            # 1. Żeglarstwo
             sail_data = []
             for t, b, bs, d in zip(times, w_bft, s_bft, rain):
-                if bs >= 6 or d >= 50: sail_data.append({"Godzina": t, "Ocena": 4, "Status": "⚠️ Niebezpiecznie"})
-                elif b >= 5: sail_data.append({"Godzina": t, "Ocena": 3, "Status": "⛵ Wymagający"})
-                elif 2 <= b <= 4 and bs < 6 and d < 30: sail_data.append({"Godzina": t, "Ocena": 2, "Status": "✅ Idealne"})
-                elif b == 1: sail_data.append({"Godzina": t, "Ocena": 1, "Status": "🐢 Zbyt słabo"})
-                else: sail_data.append({"Godzina": t, "Ocena": 0, "Status": "😶 Cisza"})
-            draw_chart(sail_data, ['⚠️ Niebezpiecznie', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], ['#d62728', '#ff7f0e', '#2ca02c', '#87CEEB', '#808080'], "⛵ Ocena żeglarska")
+                if bs >= 6 or d >= 50: desc, score, stat = f"Szkwały {bs} Bft lub deszcz {d}%", 4, "⚠️ Niebezpiecznie"
+                elif b >= 5: desc, score, stat = f"Wiatr wiodący {b} Bft (wymagający)", 3, "⛵ Wymagający"
+                elif 2 <= b <= 4 and bs < 6 and d < 30: desc, score, stat = f"Wiatr {b} Bft, szkwały {bs} Bft, deszcz {d}%", 2, "✅ Idealne"
+                elif b == 1: desc, score, stat = f"Słaby wiatr ({b} Bft)", 1, "🐢 Zbyt słabo"
+                else: desc, score, stat = f"Cisza na wodzie", 0, "😶 Cisza"
+                sail_data.append({"Godzina": t, "Ocena": score, "Status": stat, "Opis": desc})
+            draw_interactive_chart(sail_data, ['⚠️ Niebezpiecznie', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], ['#d62728', '#ff7f0e', '#2ca02c', '#87CEEB', '#808080'], "⛵ Ocena żeglarska (kliknij słupek, aby zobaczyć szczegóły)")
 
+            # 2. SUP
             sup_data = []
             for t, b, d, h in zip(times, w_bft, rain, hours):
-                if h < 7 or h > 20: sup_data.append({"Godzina": t, "Ocena": 0, "Status": "🌙 Noc / Zmierzch"})
-                elif d >= 50: sup_data.append({"Godzina": t, "Ocena": 4, "Status": "⚠️ Unikaj"})
-                elif b > 3: sup_data.append({"Godzina": t, "Ocena": 3, "Status": "⛵ Trudno"})
-                elif b == 3: sup_data.append({"Godzina": t, "Ocena": 2, "Status": "🐢 Wymagająco"})
-                else: sup_data.append({"Godzina": t, "Ocena": 1, "Status": "✅ Idealne"})
-            draw_chart(sup_data, ['🌙 Noc / Zmierzch', '⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], ['#333333', '#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena SUP")
+                if h < 7 or h > 20: desc, score, stat = "Poza godzinami dozwolonymi (noc/zmierzch)", 0, "🌙 Noc / Zmierzch"
+                elif d >= 50: desc, score, stat = f"Wysokie prawdopodobieństwo deszczu ({d}%)", 4, "⚠️ Unikaj"
+                elif b > 3: desc, score, stat = f"Za duży wiatr dla SUP ({b} Bft)", 3, "⛵ Trudno"
+                elif b == 3: desc, score, stat = f"Wiatr w granicach 3 Bft (wymagająco)", 2, "🐢 Wymagająco"
+                else: desc, score, stat = f"Spokojna woda, wiatr {b} Bft, deszcz {d}%", 1, "✅ Idealne"
+                sup_data.append({"Godzina": t, "Ocena": score, "Status": stat, "Opis": desc})
+            draw_interactive_chart(sup_data, ['🌙 Noc / Zmierzch', '⚠️ Unikaj', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], ['#333333', '#d62728', '#ff7f0e', '#87CEEB', '#2ca02c'], "🏄 Ocena SUP")
 
+            # 3. Plażowanie
             beach_data = []
             for t, tm, b, d, c, h in zip(times, temp, w_bft, rain, clouds, hours):
                 h_now_eval = int(t[:2])
                 if (h_now_eval > max_beach_hour or (h_now_eval == max_beach_hour and max_beach_minute > 0)) or h < 9:
-                    beach_data.append({"Godzina": t, "Ocena": 0, "Status": "🌙 Po zachodzie słońca"})
+                    desc, score, stat = "Po zachodzie słońca lub rano", 0, "🌙 Po zachodzie słońca"
                 elif d >= 50 or tm < 16:
-                    beach_data.append({"Godzina": t, "Ocena": 1, "Status": "⚠️ Unikaj / Chłodno"})
+                    desc, score, stat = f"Chłodno ({tm}°C) lub ryzyko deszczu ({d}%)", 1, "⚠️ Unikaj / Chłodno"
                 elif c >= 70:
-                    beach_data.append({"Godzina": t, "Ocena": 2, "Status": "☁️ Duże zachmurzenie"})
+                    desc, score, stat = f"Duże zachmurzenie ({c}%)", 2, "☁️ Duże zachmurzenie"
                 elif b > 3 or (30 <= c < 70):
-                    beach_data.append({"Godzina": t, "Ocena": 3, "Status": "⛅ Umiarkowanie"})
+                    desc, score, stat = f"Umiarkowanie (chmury {c}%, wiatr {b} Bft)", 3, "⛅ Umiarkowanie"
                 else:
-                    beach_data.append({"Godzina": t, "Ocena": 4, "Status": "☀️ Idealne słońce"})
-            draw_chart(beach_data, ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], ['#333333', '#d62728', '#7f7f7f', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
+                    desc, score, stat = f"Ciepło ({tm}°C), słońce (chmury {c}%), słaby wiatr", 4, "☀️ Idealne słońce"
+                beach_data.append({"Godzina": t, "Ocena": score, "Status": stat, "Opis": desc})
+            draw_interactive_chart(beach_data, ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], ['#333333', '#d62728', '#7f7f7f', '#ff7f0e', '#2ca02c'], "🏖️ Ocena plażowania")
 
             st.subheader("Szczegóły godzinowe")
             df = pd.DataFrame({
@@ -222,8 +240,6 @@ try:
         with tab2:
             st.subheader("📅 Kafelkowa prognoza na 7 dni")
             daily = data['daily']
-            
-            # Tworzymy rząd kolumn dla kolejnych dni (np. po 7 dni)
             days_count = len(daily['time'])
             cols = st.columns(days_count)
             
@@ -236,7 +252,6 @@ try:
                 sunrise = daily['sunrise'][i][-5:]
                 sunset = daily['sunset'][i][-5:]
                 
-                # Ocena dnia
                 if bft >= 6 or r > 5:
                     status = "⚠️ Niebezpiecznie"
                     box_color = "red"
@@ -260,7 +275,6 @@ try:
                     st.write(f"🌧️ **Deszcz:** {r} mm")
                     st.write(f"🌅 {sunrise} | 🌇 {sunset}")
                     
-                    # Kolorowe podsumowanie statusu w kafelku
                     if box_color == "green":
                         st.success(status)
                     elif box_color == "red":
