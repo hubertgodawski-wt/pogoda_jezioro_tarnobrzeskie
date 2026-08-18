@@ -85,7 +85,7 @@ try:
         'Wiatr_Bft': [knots_to_beaufort(w) for w in hourly['windspeed_10m'][start_idx : start_idx+12]],
         'Szkwały_Bft': [knots_to_beaufort(w) for w in hourly['windgusts_10m'][start_idx : start_idx+12]],
         'Kierunek_Str': [f"{degrees_to_cardinal(d)[0]} {degrees_to_cardinal(d)[1]}" for d in hourly['winddirection_10m'][start_idx : start_idx+12]],
-        'Kierunek': [degrees_to_cardinal(d)[0] for d in hourly['winddirection_10m'][start_idx : start_idx+12]], # Zabezpieczenie przed błędem z kierunkiem
+        'Kierunek': [degrees_to_cardinal(d)[0] for d in hourly['winddirection_10m'][start_idx : start_idx+12]],
         'Temp': hourly['temperature_2m'][start_idx : start_idx+12],
         'Odczuwalna': hourly['apparent_temperature'][start_idx : start_idx+12],
         'Deszcz_Prob': hourly['precipitation_probability'][start_idx : start_idx+12],
@@ -95,31 +95,88 @@ try:
         'UV': hourly['uv_index'][start_idx : start_idx+12] if 'uv_index' in hourly else [0]*12
     })
 
+    # --- NOWA, POPRAWNA LOGIKA (Skala 4=Najlepiej, Deszcz nie zasłania Wiatru) ---
     def eval_sail(row):
-        if row['Szkwały_Bft'] >= 6 or row['Deszcz_mm'] > 1.0: return 4, "⚠️ Niebezpiecznie", f"Szkwały {row['Szkwały_Bft']} Bft lub ulewa"
-        if row['Wiatr_Bft'] >= 5: return 3, "⛵ Wymagający", f"Silny wiatr {row['Wiatr_Bft']} Bft"
-        if row['Deszcz_mm'] > 0 or row['Deszcz_Prob'] >= 30: return 3, "🌦️ Możliwy deszcz", f"Szansa na opad: {row['Deszcz_mm']} mm"
-        if 2 <= row['Wiatr_Bft'] <= 4 and row['Szkwały_Bft'] < 6: return 2, "✅ Idealne", f"Wiatr {row['Wiatr_Bft']} Bft"
-        if row['Wiatr_Bft'] == 1: return 1, "🐢 Zbyt słabo", f"Słaby wiatr ({row['Wiatr_Bft']} Bft)"
-        return 0.4, "😶 Cisza", "Flauta"
+        w = row['Wiatr_Bft']
+        s = row['Szkwały_Bft']
+        rain = row['Deszcz_mm']
+        rain_prob = row['Deszcz_Prob']
+
+        # 1. Baza oceny i status zależą TYLKO od wiatru
+        if s >= 6: score, status = 0.5, "⚠️ Niebezpiecznie"
+        elif w >= 5: score, status = 3.0, "⛵ Wymagający"
+        elif 2 <= w <= 4: score, status = 4.0, "✅ Idealne"
+        elif w == 1: score, status = 2.0, "🐢 Zbyt słabo"
+        else: score, status = 1.0, "😶 Cisza"
+        
+        desc = f"Wiatr: {w} Bft, Szkwały: {s} Bft"
+
+        # 2. Deszcz uderza tylko w punkty i opis (nie maskuje koloru)
+        if rain > 1.0:
+            score = max(0.5, score - 1.5) # Duży deszcz mocno obniża wysokość słupka
+            desc += f" | 🌧️ Ulewa: {rain} mm/h"
+        elif rain > 0:
+            score = max(0.5, score - 0.5) # Lekki deszcz lekko obniża słupek
+            desc += f" | 🌦️ Deszcz: {rain} mm/h"
+        elif rain_prob >= 30:
+            desc += f" | ☁️ Szansa na opad: {rain_prob}%"
+
+        return score, status, desc
         
     def eval_sup(row):
         h = row['Czas'].hour
-        if h > 20 or h < 7: return 0.4, "🌙 Noc / Zmierzch", "Poza godzinami dozwolonymi"
-        if row['Deszcz_mm'] > 1.0: return 4, "⚠️ Unikaj", f"Ulewa ({row['Deszcz_mm']} mm/h)"
-        if row['Wiatr_Bft'] > 3: return 3, "⛵ Trudno", f"Za silny wiatr ({row['Wiatr_Bft']} Bft)"
-        if row['Deszcz_mm'] > 0 or row['Deszcz_Prob'] >= 30: return 3, "🌦️ Możliwy deszcz", f"Drobny deszcz ({row['Deszcz_mm']} mm)"
-        if row['Wiatr_Bft'] == 3: return 2, "🐢 Wymagająco", "Wiatr ok. 3 Bft"
-        return 1, "✅ Idealne", f"Wiatr {row['Wiatr_Bft']} Bft, sucho"
+        w = row['Wiatr_Bft']
+        rain = row['Deszcz_mm']
+        rain_prob = row['Deszcz_Prob']
+
+        if h > 20 or h < 7: return 0.5, "🌙 Noc / Zmierzch", "Poza godzinami"
+        
+        if w > 4: score, status = 0.5, "⚠️ Unikaj"
+        elif w == 4: score, status = 2.0, "⛵ Trudno"
+        elif w == 3: score, status = 3.0, "🐢 Wymagająco"
+        else: score, status = 4.0, "✅ Idealne"
+
+        desc = f"Wiatr: {w} Bft"
+        
+        if rain > 1.0:
+            score = max(0.5, score - 1.5)
+            desc += f" | 🌧️ Ulewa: {rain} mm/h"
+        elif rain > 0:
+            score = max(0.5, score - 0.5)
+            desc += f" | 🌦️ Deszcz: {rain} mm/h"
+        elif rain_prob >= 30:
+            desc += f" | ☁️ Szansa na opad: {rain_prob}%"
+
+        return score, status, desc
         
     def eval_beach(row):
-        if row['Czas'] > max_beach_dt or row['Czas'].hour < 9: return 0.4, "🌙 Po zachodzie słońca", "Niewłaściwa pora"
-        if row['Deszcz_mm'] > 0.5: return 1, "🌧️ Pada deszcz", f"Opady: {row['Deszcz_mm']} mm/h"
-        if row['Temp'] < 16 or row['Szkwały_Bft'] >= 5: return 1, "⚠️ Unikaj / Chłodno", f"Chłodno ({row['Temp']}°C) lub uciążliwy wiatr"
-        if row['Deszcz_mm'] > 0 or row['Deszcz_Prob'] >= 20: return 2, "🌦️ Możliwy deszczyk", f"Szansa na przelotny opad ({row['Deszcz_Prob']}%)"
-        if row['Chmury'] >= 70: return 2, "☁️ Duże zachmurzenie", f"Chmury ({row['Chmury']}%)"
-        if row['Wiatr_Bft'] > 3 or (30 <= row['Chmury'] < 70): return 3, "⛅ Umiarkowanie", "Umiarkowane warunki"
-        return 4, "☀️ Idealne słońce", f"Ciepło, słońce (UV: {row['UV']})"
+        if row['Czas'] > max_beach_dt or row['Czas'].hour < 9: 
+            return 0.5, "🌙 Po zachodzie słońca", "Niewłaściwa pora"
+
+        temp = row['Temp']
+        w = row['Wiatr_Bft']
+        s = row['Szkwały_Bft']
+        rain = row['Deszcz_mm']
+        rain_prob = row['Deszcz_Prob']
+        clouds = row['Chmury']
+
+        if temp < 16 or s >= 5: score, status = 1.0, "⚠️ Unikaj / Chłodno"
+        elif w > 3 or (30 <= clouds < 70): score, status = 3.0, "⛅ Umiarkowanie"
+        elif clouds >= 70: score, status = 2.0, "☁️ Duże zachmurzenie"
+        else: score, status = 4.0, "☀️ Idealne słońce"
+
+        desc = f"Temp: {temp}°C, Wiatr: {w} Bft"
+
+        if rain > 1.0:
+            score = 0.5
+            desc += f" | 🌧️ Ulewa: {rain} mm/h"
+        elif rain > 0:
+            score = max(0.5, score - 1.0)
+            desc += f" | 🌦️ Deszcz: {rain} mm/h"
+        elif rain_prob >= 30:
+            desc += f" | ☁️ Szansa opadu: {rain_prob}%"
+
+        return score, status, desc
 
     df_12h[['Sail_Score', 'Sail_Status', 'Sail_Desc']] = df_12h.apply(eval_sail, axis=1, result_type="expand")
     df_12h[['SUP_Score', 'SUP_Status', 'SUP_Desc']] = df_12h.apply(eval_sup, axis=1, result_type="expand")
@@ -182,7 +239,7 @@ try:
             
             base = alt.Chart(chart_df).mark_bar().encode(
                 x=alt.X('Godzina:N', title='Godzina'),
-                y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4]), title='Ocena'),
+                y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4]), title='Ocena (4=Najlepiej)'), # Jasny komunikat osi Y
                 color=alt.Color('Status:N', scale=alt.Scale(domain=domain, range=colors), title='Status'),
                 tooltip=['Godzina', 'Status', 'Opis']
             ).properties(
@@ -202,17 +259,18 @@ try:
                 status = chart_df[chart_df["Godzina"] == w_godzina]["Status"].values[0]
                 st.info(f"👉 **Godzina {w_godzina}** | {status} - {opis}")
 
+        # Powrót do czystych, wiatrowych statusów i prawidłowych przypisań kolorów
         draw_chart(df_12h, 'Sail_Score', 'Sail_Status', 'Sail_Desc',
-                   ['⚠️ Niebezpiecznie', '🌦️ Możliwy deszcz', '⛵ Wymagający', '✅ Idealne', '🐢 Zbyt słabo', '😶 Cisza'], 
-                   ['#ff3333', '#4169e1', '#ff9900', '#00ffcc', '#00bfff', '#ab82ff'], "⛵ Ocena żeglarska", "sel_sail")
+                   ['✅ Idealne', '⛵ Wymagający', '🐢 Zbyt słabo', '😶 Cisza', '⚠️ Niebezpiecznie'], 
+                   ['#00ffcc', '#ff9900', '#00bfff', '#ab82ff', '#ff3333'], "⛵ Ocena żeglarska", "sel_sail")
 
         draw_chart(df_12h, 'SUP_Score', 'SUP_Status', 'SUP_Desc',
-                   ['🌙 Noc / Zmierzch', '⚠️ Unikaj', '🌦️ Możliwy deszcz', '⛵ Trudno', '🐢 Wymagająco', '✅ Idealne'], 
-                   ['#ab82ff', '#ff3333', '#4169e1', '#ff9900', '#00bfff', '#00ffcc'], "🏄 Ocena SUP", "sel_sup")
+                   ['✅ Idealne', '🐢 Wymagająco', '⛵ Trudno', '⚠️ Unikaj', '🌙 Noc / Zmierzch'], 
+                   ['#00ffcc', '#00bfff', '#ff9900', '#ff3333', '#ab82ff'], "🏄 Ocena SUP", "sel_sup")
 
         draw_chart(df_12h, 'Beach_Score', 'Beach_Status', 'Beach_Desc',
-                   ['🌙 Po zachodzie słońca', '⚠️ Unikaj / Chłodno', '🌧️ Pada deszcz', '🌦️ Możliwy deszczyk', '☁️ Duże zachmurzenie', '⛅ Umiarkowanie', '☀️ Idealne słońce'], 
-                   ['#ab82ff', '#ff3333', '#1e90ff', '#4169e1', '#a9a9a9', '#ff9900', '#00ffcc'], "🏖️ Ocena plażowania", "sel_beach")
+                   ['☀️ Idealne słońce', '⛅ Umiarkowanie', '☁️ Duże zachmurzenie', '⚠️ Unikaj / Chłodno', '🌙 Po zachodzie słońca'], 
+                   ['#00ffcc', '#ff9900', '#a9a9a9', '#ff3333', '#ab82ff'], "🏖️ Ocena plażowania", "sel_beach")
 
         with st.expander("📊 Tabela: Szczegółowe dane godzinowe (kliknij, aby rozwinąć)"):
             display_df = df_12h[['Godzina', 'Wiatr_Bft', 'Kierunek_Str', 'Szkwały_Bft', 'Temp', 'UV', 'Chmury', 'Deszcz_mm', 'Deszcz_Prob']].copy()
