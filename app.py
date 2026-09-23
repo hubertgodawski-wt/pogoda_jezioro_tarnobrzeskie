@@ -1,330 +1,224 @@
-import streamlit as st
-import requests
-import pandas as pd
+"""Prognoza rekreacyjna dla Jeziora Tarnobrzeskiego. Uruchom: streamlit run jezioro_tarnobrzeskie.py"""
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import altair as alt
-from datetime import datetime, timedelta
+import pandas as pd
+import requests
+import streamlit as st
 
-st.set_page_config(page_title="Woda Tarnobrzeg", page_icon="🌊", layout="wide")
+LAT, LON = 50.555, 21.652
+TZ = ZoneInfo('Europe/Warsaw')
+API = 'https://api.open-meteo.com/v1/forecast'
+HOURLY = ('temperature_2m', 'apparent_temperature', 'wind_speed_10m',
+          'wind_gusts_10m', 'wind_direction_10m', 'precipitation_probability',
+          'precipitation', 'cloud_cover', 'uv_index', 'weather_code')
+DAILY = ('sunrise', 'sunset', 'temperature_2m_max', 'temperature_2m_min',
+         'precipitation_sum')
 
-st.markdown("""
-    <style>
-    [data-testid="stMetricLabel"] { font-size: 1.1rem !important; font-weight: 600 !important; }
-    [data-testid="stMetricValue"] { font-size: 2.3rem !important; font-weight: 700 !important; }
-    [data-testid="stMetricDelta"] { font-size: 1rem !important; }
-    .streamlit-expanderHeader { font-weight: bold; color: #33ccff; }
-    </style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title='Jezioro Tarnobrzeskie | Pogoda', page_icon='🌊', layout='wide')
+st.markdown('''<style>
+.block-container {max-width: 1120px; padding-top: 1.3rem;}
+[data-testid="stMetricValue"] {font-size: 1.75rem;}
+@media(max-width: 640px) {[data-testid="stMetricValue"] {font-size: 1.45rem;}}
+</style>''', unsafe_allow_html=True)
 
-current_time_warsaw = pd.Timestamp.now(tz='Europe/Warsaw')
-formatted_date = current_time_warsaw.strftime('%d.%m.%Y')
-formatted_clock = current_time_warsaw.strftime('%H:%M')
-
-st.title("🌊 Jezioro Tarnobrzeskie - warunki na wodzie")
-st.caption(f"📅 Dzisiaj jest **{formatted_date}** | ⏰ Aktualny czas: **{formatted_clock}**")
-st.caption("🌤️ Dane pogodowe dostarczane bezpłatnie przez API [Open-Meteo](https://open-meteo.com/)")
-
-btn_col1, btn_col2 = st.columns(2)
-with btn_col1:
-    st.link_button("🚗 Dojazd", "https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie", use_container_width=True)
-with btn_col2:
-    st.link_button("📹 Kamery online", "https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/", use_container_width=True)
-
-LAT, LON = "50.555", "21.652"
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_weather_data(lat, lon):
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,apparent_temperature,windspeed_10m,windgusts_10m,winddirection_10m,precipitation_probability,precipitation,cloudcover,cape,uv_index&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,sunrise,sunset&windspeed_unit=kn&timezone=Europe%2FWarsaw&forecast_days=7"
-    response = requests.get(url, timeout=10)
+def fetch_weather():
+    response = requests.get(API, params={
+        'latitude': LAT, 'longitude': LON, 'timezone': 'Europe/Warsaw',
+        'forecast_days': 7, 'wind_speed_unit': 'kn',
+        'hourly': ','.join(HOURLY), 'daily': ','.join(DAILY),
+    }, timeout=12)
     response.raise_for_status()
     return response.json()
 
-def knots_to_beaufort(kt):
-    if kt < 1: return 0
-    elif kt <= 3: return 1
-    elif kt <= 6: return 2
-    elif kt <= 10: return 3
-    elif kt <= 16: return 4
-    elif kt <= 21: return 5
-    elif kt <= 27: return 6
-    else: return 7
 
-def degrees_to_cardinal(deg):
-    if deg is None: return ("-", "⬆️")
-    dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
-    arrows = ["⬇️", "↙️", "↙️", "⬅️", "⬅️", "↖️", "↖️", "⬆️", "⬆️", "↗️", "↗️", "➡️", "➡️", "↘️", "↘️", "⬇️"]
-    ix = int((deg + 11.25) / 22.5) % 16
-    return dirs[ix], arrows[ix]
+def bft(knots):
+    """Beaufort według zaokrąglonych przedziałów w węzłach; tylko wiatr średni."""
+    if pd.isna(knots):
+        return None
+    thresholds = (1, 4, 7, 11, 17, 22, 28, 34, 41, 48, 56, 64)
+    return next((i for i, limit in enumerate(thresholds) if knots < limit), 12)
 
-def get_windows(hours):
-    if not hours: return "Brak odpowiednich okienek"
-    windows = []
-    start, prev = hours[0], hours[0]
-    for h in hours[1:]:
-        if h == prev + 1: prev = h
-        else:
-            windows.append(f"{start:02d}:00-{prev+1:02d}:00")
-            start, prev = h, h
-    windows.append(f"{start:02d}:00-{prev+1:02d}:00")
-    return " | ".join(windows)
 
-try:
-    data = fetch_weather_data(LAT, LON)
-    hourly, daily = data['hourly'], data['daily']
-    
-    now_naive = current_time_warsaw.tz_localize(None).replace(minute=0, second=0, microsecond=0)
-    dt_times = pd.to_datetime(hourly['time'])
-    start_idx = abs(dt_times - now_naive).argmin()
-    
-    sunrise_dt = datetime.fromisoformat(daily['sunrise'][0])
-    sunset_dt = datetime.fromisoformat(daily['sunset'][0])
-    max_beach_dt = sunset_dt + timedelta(minutes=30)
-    
-    df_12h = pd.DataFrame({
-        'Czas': dt_times[start_idx : start_idx+12],
-        'Godzina': [t[11:16] for t in hourly['time'][start_idx : start_idx+12]],
-        'Wiatr_Bft': [knots_to_beaufort(w) for w in hourly['windspeed_10m'][start_idx : start_idx+12]],
-        'Szkwały_Bft': [knots_to_beaufort(w) for w in hourly['windgusts_10m'][start_idx : start_idx+12]],
-        'Kierunek_Str': [f"{degrees_to_cardinal(d)[0]} {degrees_to_cardinal(d)[1]}" for d in hourly['winddirection_10m'][start_idx : start_idx+12]],
-        'Kierunek': [degrees_to_cardinal(d)[0] for d in hourly['winddirection_10m'][start_idx : start_idx+12]],
-        'Temp': hourly['temperature_2m'][start_idx : start_idx+12],
-        'Odczuwalna': hourly['apparent_temperature'][start_idx : start_idx+12],
-        'Deszcz_Prob': hourly['precipitation_probability'][start_idx : start_idx+12],
-        'Deszcz_mm': hourly['precipitation'][start_idx : start_idx+12],
-        'Chmury': hourly['cloudcover'][start_idx : start_idx+12],
-        'CAPE': hourly['cape'][start_idx : start_idx+12] if 'cape' in hourly else [0]*12,
-        'UV': hourly['uv_index'][start_idx : start_idx+12] if 'uv_index' in hourly else [0]*12
-    })
+def compass(degrees):
+    if pd.isna(degrees):
+        return '—'
+    directions = ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW')
+    return directions[int((degrees + 22.5) // 45) % 8]
 
-    def eval_sail(row):
-        w, s, rain, rain_prob = row['Wiatr_Bft'], row['Szkwały_Bft'], row['Deszcz_mm'], row['Deszcz_Prob']
-        
-        if s >= 6: score = 0.5
-        elif w >= 5: score = 3.0
-        elif 2 <= w <= 4: score = 4.0
-        elif w == 1: score = 2.0
-        else: score = 1.0
 
-        if s >= 6: return score, "⚠️ Niebezpiecznie", f"Szkwały {s} Bft"
-        if rain > 1.0: return max(0.5, score - 1.5), "🌧️ Ulewa", f"Wiatr {w} Bft, ale ulewa ({rain} mm/h)"
-        if rain > 0: return max(0.5, score - 1.0), "🌦️ Pada deszcz", f"Wiatr {w} Bft, mokro ({rain} mm/h)"
-        if w >= 5: return score, "⛵ Wymagający", f"Silny wiatr {w} Bft"
-        if 2 <= w <= 4: return score, "✅ Idealne", f"Optymalny wiatr {w} Bft"
-        if w == 1: return score, "🐢 Zbyt słabo", f"Słaby wiatr ({w} Bft)"
-        return score, "😶 Cisza", "Flauta"
-        
-    def eval_sup(row):
-        h = row['Czas'].hour
-        w, rain, rain_prob = row['Wiatr_Bft'], row['Deszcz_mm'], row['Deszcz_Prob']
-        
-        if h > 20 or h < 7: return 0.5, "🌙 Noc / Zmierzch", "Poza godzinami"
-        
-        if w > 4: score = 0.5
-        elif w == 4: score = 2.0
-        elif w == 3: score = 3.0
-        else: score = 4.0
+def level(label, reasons):
+    return {'ocena': label, 'powody': '; '.join(reasons) if reasons else 'Warunki pogodowe sprzyjające'}
 
-        if w > 4: return score, "⚠️ Unikaj", f"Zbyt silny wiatr ({w} Bft)"
-        if rain > 1.0: return max(0.5, score - 1.5), "🌧️ Ulewa", f"Silny deszcz ({rain} mm/h)"
-        if rain > 0: return max(0.5, score - 1.0), "🌦️ Pada deszcz", f"Wiatr ok, ale mokro ({rain} mm/h)"
-        if w == 4: return score, "⛵ Trudno", f"Wiatr {w} Bft"
-        if w == 3: return score, "🐢 Wymagająco", "Wiatr ok. 3 Bft"
-        return score, "✅ Idealne", f"Spokojna woda ({w} Bft)"
-        
-    def eval_beach(row):
-        if row['Czas'] > max_beach_dt or row['Czas'].hour < 9: return 0.5, "🌙 Po zachodzie słońca", "Niewłaściwa pora"
-        
-        temp, w, s, rain, rain_prob, clouds = row['Temp'], row['Wiatr_Bft'], row['Szkwały_Bft'], row['Deszcz_mm'], row['Deszcz_Prob'], row['Chmury']
 
-        if temp < 16 or s >= 5: return 1.0, "⚠️ Unikaj / Chłodno", f"Chłodno ({temp}°C) lub uciążliwy wiatr"
-        if rain > 1.0: return 0.5, "🌧️ Ulewa", f"Ulewa ({rain} mm/h)"
-        if rain > 0: return 1.5, "🌦️ Pada deszcz", f"Deszcz ({rain} mm/h)"
-        if w > 3 or (30 <= clouds < 70): return 3.0, "⛅ Umiarkowanie", "Umiarkowane warunki"
-        if clouds >= 70: return 2.0, "☁️ Duże zachmurzenie", f"Chmury ({clouds}%)"
-        return 4.0, "☀️ Idealne słońce", f"Ciepło, słońce (UV: {row['UV']})"
-
-    df_12h[['Sail_Score', 'Sail_Status', 'Sail_Desc']] = df_12h.apply(eval_sail, axis=1, result_type="expand")
-    df_12h[['SUP_Score', 'SUP_Status', 'SUP_Desc']] = df_12h.apply(eval_sup, axis=1, result_type="expand")
-    df_12h[['Beach_Score', 'Beach_Status', 'Beach_Desc']] = df_12h.apply(eval_beach, axis=1, result_type="expand")
-
-    curr = df_12h.iloc[0]
-
-    st.markdown("---")
-    st.subheader("📌 Aktualnie nad wodą i ostrzeżenia na dziś")
-    
-    warnings_critical = []
-    warnings_standard = []
-
-    storm_df = df_12h[(df_12h['CAPE'] >= 300) & (df_12h['Deszcz_Prob'] > 40)]
-    if not storm_df.empty: warnings_critical.append(f"⚡ **OSTRZEŻENIE BURZOWE:** Ryzyko wyładowań od godz. {storm_df['Godzina'].iloc[0]}. Zejdź z wody!")
-
-    gust_df = df_12h[df_12h['Szkwały_Bft'] >= 6]
-    if not gust_df.empty: warnings_critical.append(f"⛵ **OSTRZEŻENIE ŻEGLARSKIE:** Szkwały ≥ 6 Bft od godz. {gust_df['Godzina'].iloc[0]}.")
-
-    rain_df = df_12h[df_12h['Deszcz_mm'] > 1.0]
-    if not rain_df.empty: warnings_standard.append(f"🌧️ **OSTRZEŻENIE O OPADACH:** Zapowiadany uciążliwy deszcz od godz. {rain_df['Godzina'].iloc[0]}.")
-
-    sup_wind = df_12h[df_12h['Wiatr_Bft'] >= 4]
-    if not sup_wind.empty: warnings_standard.append(f"🏄 **OSTRZEŻENIE SUP (SILNY WIATR):** Wiatr ≥ 4 Bft od godz. {sup_wind['Godzina'].iloc[0]}.")
-
-    offshore = df_12h[(df_12h['Wiatr_Bft'] >= 3) & (df_12h['Kierunek'].isin(["E", "ENE", "ESE", "SE"]))]
-    if not offshore.empty: warnings_standard.append(f"🏄 **UWAGA SUP (WIATR ODBRZEGOWY):** Wiatr wschodni od godz. {offshore['Godzina'].iloc[0]}.")
-
-    high_uv = df_12h[df_12h['UV'] >= 7]
-    if not high_uv.empty: warnings_standard.append(f"☀️ **EKSTREMALNE UV:** Indeks UV ≥ 7 od godz. {high_uv['Godzina'].iloc[0]}.")
-
-    if warnings_critical or warnings_standard:
-        for w in warnings_critical: st.error(w)
-        for w in warnings_standard: st.warning(w)
+def assess(row, activity, sunrise, sunset):
+    """Proste filtry prognozy, a nie ocena bezpieczeństwa akwenu."""
+    wind, gust = row.wind_speed_10m, row.wind_gusts_10m
+    rain, chance = row.precipitation, row.precipitation_probability
+    code = row.weather_code
+    if any(pd.isna(v) for v in (wind, gust, rain, chance, code)):
+        return level('Brak danych', ['niepełna prognoza'])
+    if row.time < sunrise or row.time >= sunset:
+        return level('Poza porą dzienną', ['przed wschodem lub po zachodzie słońca'])
+    if code in (95, 96, 99):
+        return level('Niekorzystne', ['prognozowana burza'])
+    if activity == 'Żagle':
+        if gust >= 22 or wind >= 17:
+            return level('Niekorzystne', [f'wiatr {wind:.0f} kn, porywy {gust:.0f} kn'])
+        if wind < 4:
+            return level('Słaby wiatr', [f'wiatr {wind:.0f} kn'])
+        reasons = []
+        if gust >= 17:
+            reasons.append(f'porywy do {gust:.0f} kn')
+    elif activity == 'SUP':
+        if wind >= 11 or gust >= 17:
+            return level('Niekorzystne', [f'wiatr {wind:.0f} kn, porywy {gust:.0f} kn'])
+        reasons = []
+        if wind >= 7 or gust >= 11:
+            reasons.append(f'wiatr {wind:.0f} kn, porywy {gust:.0f} kn')
     else:
-        st.success("✅ **Werdykt na teraz:** Brak ostrzeżeń. Warunki bezpieczne i stabilne.")
+        if pd.isna(row.temperature_2m):
+            return level('Brak danych', ['brak temperatury'])
+        if row.temperature_2m < 16 or gust >= 28:
+            return level('Niekorzystne', [f'{row.temperature_2m:.0f}°C, porywy {gust:.0f} kn'])
+        reasons = []
+        if row.temperature_2m < 21 or wind >= 11:
+            reasons.append(f'{row.temperature_2m:.0f}°C, wiatr {wind:.0f} kn')
+    if rain > 1 or chance >= 70:
+        return level('Niekorzystne', reasons + [f'opad {rain:.1f} mm, prawdopodobieństwo {chance:.0f}%'])
+    if rain > 0 or chance >= 40:
+        reasons.append(f'możliwy opad ({chance:.0f}%)')
+    return level('Umiarkowane' if reasons else 'Sprzyjające', reasons)
 
-    m_col1, m_col2 = st.columns(2)
-    m_col1.metric("Temperatura", f"{round(curr['Temp'], 1)}°C", f"Odczuwalna: {round(curr['Odczuwalna'], 1)}°C")
-    m_col2.metric("Wiatr", f"{curr['Wiatr_Bft']} Bft ({curr['Kierunek_Str']})", f"Szkwały: {curr['Szkwały_Bft']} Bft")
-    
-    m_col3, m_col4 = st.columns(2)
-    m_col3.metric("UV / Chmury", f"UV: {round(curr['UV'], 1)}", f"Chmury: {curr['Chmury']}%")
-    m_col4.metric("Deszcz (Teraz)", f"{curr['Deszcz_mm']} mm/h")
-    
-    st.markdown("---")
 
-    tab1, tab2 = st.tabs(["Dziś (godzinowo)", "Prognoza na 7 dni"])
-    
-    with tab1:
-        st.caption(f"🌅 Wschód słońca: **{sunrise_dt.strftime('%H:%M')}** | Zachód słońca: **{sunset_dt.strftime('%H:%M')}**")
-        st.info("👆 **Wskazówka:** Kliknij (tapnij) dowolny słupek wykresu, aby zobaczyć szczegóły poniżej.")
+def windows(times):
+    if not times:
+        return 'Brak w pokazanym zakresie'
+    spans = []
+    start = previous = times[0]
+    for moment in times[1:]:
+        if moment - previous != pd.Timedelta(hours=1):
+            spans.append(f'{start:%d.%m %H:%M}–{previous + pd.Timedelta(hours=1):%H:%M}')
+            start = moment
+        previous = moment
+    spans.append(f'{start:%d.%m %H:%M}–{previous + pd.Timedelta(hours=1):%H:%M}')
+    return ', '.join(spans)
 
-        # --- CAŁKOWICIE NOWY SPOSÓB RYSOWANIA WYKRESÓW (Słupki + Emotki) ---
-        def draw_chart(df, score_col, status_col, desc_col, title, sel_name):
-            chart_df = df[['Godzina', score_col, status_col, desc_col]].copy()
-            chart_df.columns = ['Godzina', 'Ocena', 'Status', 'Opis']
-            
-            # Ekstrakcja emotki ze statusu (wyciąga pierwszy znak, czyli np. "☀️" z "☀️ Idealne słońce")
-            chart_df['Emoji'] = chart_df['Status'].apply(lambda x: x.split(' ')[0])
-            
-            st.subheader(title)
-            click_sel = alt.selection_point(name=sel_name, fields=['Godzina'], on='click', empty='none')
-            
-            # Wspólna podstawa wykresu
-            base = alt.Chart(chart_df).encode(
-                x=alt.X('Godzina:N', title='Godzina'),
-                y=alt.Y('Ocena:Q', scale=alt.Scale(domain=[0, 4.5]), title='Ocena (4=Najlepiej)'), # Domenę dajemy do 4.5, aby zmieściła się emotka
-                tooltip=['Godzina', 'Status', 'Opis']
-            )
-            
-            # Jednolite słupki
-            bars = base.mark_bar(
-                color='#3b82f6', # Elegancki błękitny kolor
-                cornerRadiusTopLeft=4,
-                cornerRadiusTopRight=4,
-                size=22 # Odpowiednia szerokość
-            ).encode(
-                opacity=alt.condition(click_sel, alt.value(1.0), alt.value(0.4))
-            ).add_params(click_sel)
-            
-            # Emotki jako etykiety nad słupkami
-            emojis = base.mark_text(
-                align='center',
-                baseline='bottom',
-                dy=-3, # Lekko podnosimy ikonę nad słupek
-                fontSize=20 # Duża, czytelna wielkość
-            ).encode(
-                text='Emoji:N',
-                opacity=alt.condition(click_sel, alt.value(1.0), alt.value(0.4))
-            )
-            
-            # Łączymy warstwy (słupki + emotki)
-            chart = alt.layer(bars, emojis).properties(
-                height=180, background='transparent'
-            ).configure_view(stroke=None)
-            
-            event = st.altair_chart(chart, use_container_width=True, theme="streamlit", on_select="rerun")
-            
-            sel_data = getattr(event.selection, sel_name, [])
-            if len(sel_data) > 0:
-                w_godzina = sel_data[0]["Godzina"]
-                opis = chart_df[chart_df["Godzina"] == w_godzina]["Opis"].values[0]
-                status = chart_df[chart_df["Godzina"] == w_godzina]["Status"].values[0]
-                st.info(f"👉 **Godzina {w_godzina}** | {status} - {opis}")
 
-        # Rysowanie wykresów z nową funkcją (bez definiowania tablic kolorów!)
-        draw_chart(df_12h, 'Sail_Score', 'Sail_Status', 'Sail_Desc', "⛵ Ocena żeglarska", "sel_sail")
-        draw_chart(df_12h, 'SUP_Score', 'SUP_Status', 'SUP_Desc', "🏄 Ocena SUP", "sel_sup")
-        draw_chart(df_12h, 'Beach_Score', 'Beach_Status', 'Beach_Desc', "🏖️ Ocena plażowania", "sel_beach")
+st.title('🌊 Jezioro Tarnobrzeskie')
+st.caption('Prognoza pogody na jeziorze • strefa czasowa: Polska')
+try:
+    payload = fetch_weather()
+    df = pd.DataFrame(payload['hourly'])
+    required = {'time', *HOURLY}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError('Brakuje pól prognozy: ' + ', '.join(sorted(missing)))
+    df['time'] = pd.to_datetime(df['time'])
+    for field in HOURLY:
+        df[field] = pd.to_numeric(df[field], errors='coerce')
+    now = pd.Timestamp.now(tz=TZ).tz_localize(None)
+    future = df.loc[df.time >= now.floor('h')].head(24).copy()
+    if future.empty:
+        raise ValueError('Brak aktualnej prognozy godzinowej')
+    daily = pd.DataFrame(payload['daily'])
+    daily['date'] = pd.to_datetime(daily['time']).dt.date
+    daily['sunrise'] = pd.to_datetime(daily['sunrise'])
+    daily['sunset'] = pd.to_datetime(daily['sunset'])
+    df['date'] = df.time.dt.date
+    future['date'] = future.time.dt.date
+    df = df.merge(daily[['date', 'sunrise', 'sunset']], on='date', how='left')
+    future = future.merge(daily[['date', 'sunrise', 'sunset']], on='date', how='left')
+    if future[['sunrise', 'sunset']].isna().any().any():
+        raise ValueError('Brak godzin wschodu lub zachodu słońca')
+except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
+    st.error(f'Nie udało się pobrać kompletnej prognozy. Spróbuj ponownie za chwilę. ({exc})')
+    st.stop()
 
-        with st.expander("📊 Tabela: Szczegółowe dane godzinowe (kliknij, aby rozwinąć)"):
-            display_df = df_12h[['Godzina', 'Wiatr_Bft', 'Kierunek_Str', 'Szkwały_Bft', 'Temp', 'UV', 'Chmury', 'Deszcz_mm', 'Deszcz_Prob']].copy()
-            display_df.columns = ["Godzina", "Wiatr (Bft)", "Kierunek", "Szkwały (Bft)", "Temp (°C)", "UV", "Chmury (%)", "Deszcz (mm)", "Szansa (%)"]
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+current = future.iloc[0]
+st.caption(f'Pokazywana godzina prognozy: {current.time:%d.%m %H:%M} • aktualny czas: {now:%H:%M} • aktualizacja danych: co najwyżej co 15 min')
+cols = st.columns(4)
+cols[0].metric('Temperatura', f'{current.temperature_2m:.0f}°C' if pd.notna(current.temperature_2m) else '—')
+cols[1].metric('Wiatr', f'{current.wind_speed_10m:.0f} kn' if pd.notna(current.wind_speed_10m) else '—',
+               f'{compass(current.wind_direction_10m)} • {bft(current.wind_speed_10m)} Bft' if pd.notna(current.wind_speed_10m) else None)
+cols[2].metric('Porywy', f'{current.wind_gusts_10m:.0f} kn' if pd.notna(current.wind_gusts_10m) else '—')
+cols[3].metric('Opad', f'{current.precipitation:.1f} mm/h' if pd.notna(current.precipitation) else '—',
+               f'szansa {current.precipitation_probability:.0f}%' if pd.notna(current.precipitation_probability) else None)
 
-    with tab2:
-        st.subheader("📅 Kafelkowa prognoza na 7 dni")
-        
-        for i in range(len(daily['time'])):
-            t_date = daily['time'][i]
-            w = daily['windspeed_10m_max'][i]
-            r = daily['precipitation_sum'][i] 
-            bft = knots_to_beaufort(w)
-            temp_max = round(daily['temperature_2m_max'][i], 1)
-            sunrise = daily['sunrise'][i][-5:]
-            sunset = daily['sunset'][i][-5:]
-            
-            day_indices = [idx for idx, time_str in enumerate(hourly['time']) if time_str.startswith(t_date)]
-            sup_hours, sail_hours = [], []
-            
-            for idx in day_indices:
-                h_bft = knots_to_beaufort(hourly['windspeed_10m'][idx])
-                h_gust = knots_to_beaufort(hourly['windgusts_10m'][idx])
-                h_rain_prob = hourly['precipitation_probability'][idx]
-                h_rain_mm = hourly['precipitation'][idx] 
-                h_val = int(hourly['time'][idx][11:13])
-                
-                if 8 <= h_val <= 20 and h_rain_mm <= 1.0:
-                    if h_bft <= 2 and h_rain_prob < 50: sup_hours.append(h_val)
-                    if 2 <= h_bft <= 4 and h_gust < 6 and h_rain_prob < 50: sail_hours.append(h_val)
-                        
-            sup_okienka = get_windows(sup_hours)
-            zagiel_okienka = get_windows(sail_hours)
+st.subheader('Na teraz')
+activity_cols = st.columns(3)
+for col, name, icon in zip(activity_cols, ('Żagle', 'SUP', 'Plaża'), ('⛵', '🏄', '🏖️')):
+    result = assess(current, name, current.sunrise, current.sunset)
+    with col:
+        with st.container(border=True):
+            st.markdown(f'**{icon} {name}: {result["ocena"]}**')
+            st.caption(result['powody'])
+st.caption('Oceny są orientacyjne i dotyczą prognozy, nie warunków obserwowanych na miejscu. Sprawdź lokalne komunikaty, szczególnie przed wejściem na wodę.')
 
-            if bft >= 6:
-                status, box_color = "⚠️ Niebezpiecznie", "red"
-                uzasadnienie = f"Wiatr w porywach osiągnie ryzykowny poziom **{bft} Bft**."
-            elif r > 5:
-                status, box_color = "🌧️ Deszczowo", "blue"
-                uzasadnienie = f"Mokry dzień (suma opadów: **{r} mm**). Dłuższe pływanie będzie niekomfortowe."
-            elif len(sail_hours) >= 4 and len(sup_hours) >= 4:
-                status, box_color = "🌟 Rewelacyjny dzień", "green"
-                uzasadnienie = "Brak ulew, świetny wiatr i długie okienka pogodowe dla wszystkich."
-            elif len(sail_hours) >= 4:
-                status, box_color = "⛵ Świetny na żagle", "green"
-                uzasadnienie = "Stabilny wiatr bez ulew. Wymarzona pogoda dla żeglarzy."
-            elif len(sup_hours) >= 4:
-                status, box_color = "🏄 Świetny na SUP", "green"
-                uzasadnienie = "Spokojna woda bez ulew i silnego wiatru."
-            elif len(sail_hours) > 0 or len(sup_hours) > 0:
-                status, box_color = "⛅ Krótkie okienka", "orange"
-                uzasadnienie = "Zmienny wiatr lub opady. Zejście na wodę możliwe tylko przez krótki czas."
+next_12 = future.head(12)
+alerts = []
+for title, mask in (
+    ('Burza w prognozie', next_12.weather_code.isin([95, 96, 99])),
+    ('Silniejsze porywy', next_12.wind_gusts_10m >= 22),
+    ('Intensywniejszy opad', next_12.precipitation > 1),
+):
+    rows = next_12.loc[mask]
+    if not rows.empty:
+        alerts.append(f'{title}: od {rows.iloc[0].time:%d.%m %H:%M}')
+if alerts:
+    st.warning('W prognozie na kolejne 12 godzin: ' + ' • '.join(alerts))
+else:
+    st.info('W prognozie na kolejne 12 godzin nie wykryto burzy, porywów ≥22 kn ani opadu >1 mm/h. To nie jest potwierdzenie bezpieczeństwa.')
+
+hour_tab, week_tab = st.tabs(['Najbliższe 24 godziny', 'Kolejne dni'])
+with hour_tab:
+    activity = st.segmented_control('Pokaż warunki dla', ['Żagle', 'SUP', 'Plaża'], default='Żagle')
+    activity = activity or 'Żagle'
+    view = future.copy()
+    evaluations = [assess(row, activity, row.sunrise, row.sunset) for row in view.itertuples()]
+    view['Ocena'] = [item['ocena'] for item in evaluations]
+    view['Uzasadnienie'] = [item['powody'] for item in evaluations]
+    candidates = view.loc[view.Ocena.isin(['Sprzyjające', 'Umiarkowane']), 'time'].tolist()
+    st.markdown(f'**Okna pogodowe: {windows(candidates)}**')
+    st.caption('Okno jest zestawieniem godzin prognozy; warunki mogą się zmienić.')
+    plot = view[['time', 'wind_speed_10m', 'wind_gusts_10m']].melt('time', var_name='Rodzaj', value_name='Węzły')
+    plot['Rodzaj'] = plot['Rodzaj'].map({'wind_speed_10m': 'Wiatr', 'wind_gusts_10m': 'Porywy'})
+    chart = alt.Chart(plot).mark_line(point=True).encode(
+        x=alt.X('time:T', title='Godzina', axis=alt.Axis(format='%d.%m %H:%M')),
+        y=alt.Y('Węzły:Q', title='Prędkość (kn)', scale=alt.Scale(zero=True)),
+        color=alt.Color('Rodzaj:N', scale=alt.Scale(domain=['Wiatr', 'Porywy'], range=['#2288bd', '#e08e35'])),
+        tooltip=[alt.Tooltip('time:T', title='Czas', format='%d.%m %H:%M'), 'Rodzaj:N', 'Węzły:Q'],
+    ).properties(height=240)
+    st.altair_chart(chart, use_container_width=True)
+    details = view[['time', 'Ocena', 'Uzasadnienie', 'wind_speed_10m', 'wind_gusts_10m',
+                    'wind_direction_10m', 'temperature_2m', 'precipitation_probability', 'precipitation']].copy()
+    details['wind_direction_10m'] = details['wind_direction_10m'].map(compass)
+    details.columns = ['Godzina', 'Ocena', 'Powód', 'Wiatr (kn)', 'Porywy (kn)', 'Kierunek',
+                       'Temp. (°C)', 'Szansa opadu (%)', 'Opad (mm)']
+    details['Godzina'] = details['Godzina'].dt.strftime('%d.%m %H:%M')
+    with st.expander('Szczegóły godzinowe'):
+        st.dataframe(details, hide_index=True, use_container_width=True)
+
+with week_tab:
+    st.caption('Każdy dzień liczony jest tylko z pozostałych godzin dziennych; dzisiaj pomijamy minione godziny.')
+    for day in daily.itertuples():
+        remaining = df.loc[(df.time.dt.date == day.date) & (df.time >= now.floor('h')) &
+                           (df.time >= day.sunrise) & (df.time < day.sunset)]
+        with st.container(border=True):
+            st.markdown(f'**{day.date:%d.%m.%Y}**  ·  {day.temperature_2m_min:.0f}–{day.temperature_2m_max:.0f}°C  ·  opad dobowy {day.precipitation_sum:.1f} mm')
+            st.caption(f'Wschód {day.sunrise:%H:%M} • zachód {day.sunset:%H:%M}')
+            if remaining.empty:
+                st.caption('Brak pozostałych godzin dziennych')
             else:
-                status, box_color = "😶 Brak warunków", "gray"
-                uzasadnienie = "Brak bezpiecznych okienek (zbyt silny wiatr, ulewy lub całkowita flauta)."
+                for name, icon in (('Żagle', '⛵'), ('SUP', '🏄'), ('Plaża', '🏖️')):
+                    good = [row.time for row in remaining.itertuples()
+                            if assess(row, name, row.sunrise, row.sunset)['ocena'] in ('Sprzyjające', 'Umiarkowane')]
+                    st.caption(f'{icon} {name}: {windows(good)}')
 
-            with st.container(border=True):
-                c1, c2, c3 = st.columns([1.5, 3, 1.5])
-                with c1: st.markdown(f"### {t_date}")
-                with c2:
-                    st.write(f"🌡️ Max: **{temp_max}°C** | 💨 Wiatr: **{bft} Bft** | 🌧️ Deszcz: **{r} mm**")
-                    st.caption(f"🌅 {sunrise} | 🌇 {sunset}")
-                with c3:
-                    if box_color == "green": st.success(status)
-                    elif box_color == "red": st.error(status)
-                    elif box_color == "orange": st.warning(status)
-                    elif box_color == "blue": st.info(status)
-                    else: st.info(status)
-                
-                with st.expander("🔎 Kliknij, by zobaczyć uzasadnienie i możliwe okienka"):
-                    st.markdown(f"**Ocena:** {uzasadnienie}")
-                    st.markdown(f"🏄 **Godziny na SUP:** {sup_okienka}")
-                    st.markdown(f"⛵ **Godziny na Żagle:** {zagiel_okienka}")
-
-except Exception as e:
-    st.error(f"Wystąpił problem z połączeniem z serwerem pogodowym. Spróbuj odświeżyć stronę za chwilę. (Szczegóły: {e})")
+link_a, link_b = st.columns(2)
+link_a.link_button('🚗 Dojazd', 'https://www.google.com/maps/dir/?api=1&destination=Jezioro+Tarnobrzeskie', use_container_width=True)
+link_b.link_button('📹 Kamery nad jeziorem', 'https://mosir.tarnobrzeg.pl/jezioro-tarnobrzeskie/kamery-on-line/', use_container_width=True)
+st.caption('Dane: Open-Meteo. Kierunek oznacza stronę, z której wieje wiatr. Porywy pokazujemy w węzłach; skala Beauforta dotyczy średniego wiatru.')
